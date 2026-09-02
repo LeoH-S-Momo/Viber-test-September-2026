@@ -5,10 +5,10 @@
   "description": "SeaPass — frontend Next.js (site publico, area do passageiro, painel do organizador, painel admin)",
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
+    "build": "next build && node scripts/copy-standalone-assets.mjs",
+    "start": "node .next/standalone/apps/web/server.js",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
     "test": "vitest run",
     "test:e2e": "playwright test"
   },

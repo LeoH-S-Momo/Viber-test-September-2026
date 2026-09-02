@@ -25,4 +25,15 @@ describe('ApiStatus', () => {
       expect(screen.getByText(/api indisponível/i)).toBeInTheDocument();
     });
   });
+
+  it('flags a degraded status (e.g. database/redis down) instead of showing it as fully healthy', async () => {
+    vi.spyOn(healthService, 'getApiHealth').mockResolvedValue({ status: 'error' });
+
+    render(<ApiStatus />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/api conectada/i)).toBeInTheDocument();
+      expect(screen.getByText(/dependência.*pode estar indisponível/i)).toBeInTheDocument();
+    });
+  });
 });

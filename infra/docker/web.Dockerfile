@@ -17,6 +17,10 @@ RUN pnpm --filter @seapass/web build
 
 FROM base AS runtime
 ENV NODE_ENV=production
+# O server.js do output "standalone" escuta em "localhost" por padrao — sem isso, o
+# mapeamento de porta do Docker (-p 3000:3000) nao alcancaria a app de fora do container.
+ENV HOSTNAME="0.0.0.0"
+ENV PORT=3000
 COPY --from=build /app/apps/web/.next/standalone ./
 COPY --from=build /app/apps/web/.next/static ./apps/web/.next/static
 COPY --from=build /app/apps/web/public ./apps/web/public

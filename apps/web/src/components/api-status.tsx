@@ -46,9 +46,12 @@ export function ApiStatus() {
     );
   }
 
+  const isFullyHealthy = state.data.status === 'ok';
+
   return (
-    <p className="text-sm text-green-600">
+    <p className={isFullyHealthy ? 'text-sm text-green-600' : 'text-sm text-amber-600'}>
       API conectada — status: <strong>{state.data.status}</strong>
+      {!isFullyHealthy && ' (alguma dependência, como banco ou Redis, pode estar indisponível)'}
     </p>
   );
 }

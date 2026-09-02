@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { LoggerModule } from 'nestjs-pino';
 import { validateEnv } from './config/env.schema';
+import { PrismaModule } from './database/prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
 import { HealthModule } from './health/health.module';
 
@@ -20,6 +21,7 @@ import { HealthModule } from './health/health.module';
             : { target: 'pino-pretty', options: { singleLine: true } },
       },
     }),
+    PrismaModule,
     RedisModule,
     HealthModule,
   ],

@@ -1,0 +1,25 @@
+# Nunca copiar node_modules para o contexto de build — os binarios nativos instalados
+# localmente (esbuild, @next/swc, etc.) sao especificos da plataforma do host e nao
+# funcionam dentro do container Linux; `pnpm install` deve rodar de novo dentro da imagem.
+node_modules
+**/node_modules
+
+.git
+.turbo
+**/.next
+**/dist
+**/coverage
+**/*.tsbuildinfo*
+
+# Segredos — nunca devem ir para dentro de uma imagem Docker.
+.env
+.env.*
+!.env.example
+!**/.env.example
+
+infra/.data
+**/playwright-report
+**/test-results
+
+.vscode
+.idea

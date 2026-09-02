@@ -38,10 +38,14 @@ cp apps/web/.env.example apps/web/.env.local
 # 2. Infraestrutura (Postgres, Redis, MinIO)
 docker compose -f infra/docker-compose.yml up -d
 
-# 3. Dependencias
+# 3. Dependencias (o postinstall ja gera o Prisma Client)
 pnpm install
 
-# 4. Sobe web + api juntos (via Turborepo)
+# 4. Aplica as migrations e popula dados de demonstracao
+pnpm db:migrate
+pnpm db:seed
+
+# 5. Sobe web + api juntos (via Turborepo)
 pnpm dev
 ```
 
@@ -52,6 +56,23 @@ pnpm dev
 
 A API sobe mesmo que Postgres/Redis ainda não estejam prontos — o processo não cai, apenas
 `/health` reporta a dependência como indisponível (`503`) até o `docker compose up` terminar.
+
+### Dados de demonstração (seed)
+
+`pnpm db:seed` popula um cenário completo pronto para navegar: 2 organizadores (um aprovado, um
+pendente), 1 navio com 4 decks/categorias/22 cabines, 1 cruzeiro publicado com itinerário de 5
+dias, preços por categoria, eventos, restaurantes e experiências. Não popula reservas/pagamentos
+(fora de escopo desta etapa — ver `docs/product/BACKLOG.md`). É idempotente: pode rodar de novo
+sem duplicar dados.
+
+Usuários de teste (senha para todos: `Seapass@123`):
+
+| E-mail | Papel |
+|---|---|
+| `admin@seapass.com` | Admin da plataforma |
+| `organizador@rockinsea.com` | Admin do organizador "Rock in Sea" |
+| `operador@rockinsea.com` | Operador do organizador "Rock in Sea" |
+| `passageiro1@example.com` / `passageiro2@example.com` | Passageiros |
 
 ### Outros scripts úteis
 
@@ -72,13 +93,14 @@ pnpm test:e2e             # testes end-to-end do web (Playwright) — requer
   necessário porque `next build` (modo `standalone`) tenta recriar symlinks ao copiar o
   `node_modules`, o que falha com `EPERM` no Windows sem privilégio elevado ou "Developer Mode"
   habilitado. Em Linux/macOS (incluindo os builds Docker e o CI) esse problema não existe.
-- **Prisma**: o `schema.prisma` está configurado (datasource + generator) mas ainda **sem
-  nenhum model** — o CLI do Prisma se recusa a gerar o client sem pelo menos um model. Por isso
-  o health check do banco usa o driver `pg` puro por enquanto, e `db:migrate`/`db:seed` são
-  no-ops até a modelagem de domínio ser adicionada (ver `docs/product/BACKLOG.md`).
+- **Prisma**: `schema.prisma` tem a modelagem completa do domínio (26 models — ver
+  `docs/architecture/decisions/0004-prisma-reinstated-with-domain-model.md`). `pnpm install` já
+  gera o Prisma Client automaticamente (`postinstall`); rode `pnpm db:migrate` para aplicar as
+  migrations antes do primeiro `pnpm dev`.
 
 ## Status
 
-Fase atual: bootstrap do monorepo concluído — frontend e backend sobem localmente, health check
-e documentação de API funcionando, nenhuma funcionalidade de negócio implementada ainda. Ver
+Fase atual: bootstrap do monorepo e camada de persistência concluídos — frontend e backend sobem
+localmente, banco modelado (26 tabelas) e migrado, seed de demonstração funcionando, health
+check e documentação de API no ar. Fluxo de reserva/pagamento ainda não implementado. Ver
 `docs/DEVLOG.md` para o histórico e `docs/product/BACKLOG.md` para o roadmap priorizado.

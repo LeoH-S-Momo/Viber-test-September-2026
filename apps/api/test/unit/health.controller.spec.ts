@@ -1,7 +1,7 @@
 import { Test } from '@nestjs/testing';
 import { HealthCheckService } from '@nestjs/terminus';
 import { HealthController } from '../../src/health/health.controller';
-import { DatabaseHealthIndicator } from '../../src/health/indicators/database.health-indicator';
+import { PrismaHealthIndicator } from '../../src/health/indicators/prisma.health-indicator';
 import { RedisHealthIndicator } from '../../src/health/indicators/redis.health-indicator';
 
 describe('HealthController', () => {
@@ -14,7 +14,7 @@ describe('HealthController', () => {
       controllers: [HealthController],
       providers: [
         { provide: HealthCheckService, useValue: healthCheckService },
-        { provide: DatabaseHealthIndicator, useValue: databaseIndicator },
+        { provide: PrismaHealthIndicator, useValue: databaseIndicator },
         { provide: RedisHealthIndicator, useValue: redisIndicator },
       ],
     }).compile();

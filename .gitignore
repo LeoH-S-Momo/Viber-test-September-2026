@@ -8,7 +8,7 @@ build/
 .next/
 out/
 coverage/
-*.tsbuildinfo
+*.tsbuildinfo*
 
 # Turborepo
 .turbo/

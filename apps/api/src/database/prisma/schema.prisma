@@ -7,6 +7,694 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Nenhum model definido ainda. A modelagem do dominio (User, Organizer, Ship,
-// Cruise, Cabin, Booking, ...) sera adicionada na proxima etapa, seguindo o
-// modelo de dados descrito em docs/product/BACKLOG.md.
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  PENDING_VERIFICATION
+}
+
+/// Conjunto fechado de papeis da plataforma (ver docs/product/BACKLOG.md, secao 2 — Personas).
+/// Novos papeis exigem migration; nao ha admin de "papeis customizados" na v1.
+enum RoleKey {
+  PASSENGER
+  ORGANIZER_ADMIN
+  ORGANIZER_STAFF
+  PLATFORM_ADMIN
+}
+
+enum OrganizerStatus {
+  PENDING
+  APPROVED
+  SUSPENDED
+  REJECTED
+}
+
+enum CabinStatus {
+  ACTIVE
+  MAINTENANCE
+  RETIRED
+}
+
+enum CruiseStatus {
+  DRAFT
+  PUBLISHED
+  CANCELLED
+  COMPLETED
+}
+
+enum EventCategory {
+  SHOW
+  WORKSHOP
+  PARTY
+  LECTURE
+  MEET_AND_GREET
+  OTHER
+}
+
+enum DocumentType {
+  PASSPORT
+  NATIONAL_ID
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  CREDIT_CARD
+  PIX
+  BOLETO
+}
+
+enum PaymentStatus {
+  PENDING
+  APPROVED
+  DECLINED
+  REFUNDED
+}
+
+enum TicketStatus {
+  ISSUED
+  CHECKED_IN
+  CANCELLED
+}
+
+enum CouponDiscountType {
+  PERCENTAGE
+  FIXED_AMOUNT
+}
+
+enum NotificationType {
+  BOOKING_CONFIRMED
+  PAYMENT_APPROVED
+  PAYMENT_DECLINED
+  ITINERARY_CHANGED
+  CHECKIN_REMINDER
+  GENERIC
+}
+
+enum NotificationChannel {
+  EMAIL
+  IN_APP
+}
+
+// ============================================================================
+// AUTH / RBAC
+// ============================================================================
+// User serve os tres perfis (passageiro, organizador, admin global) — ver
+// docs/architecture/stack-and-structure.md. O papel efetivo de cada usuario
+// vem de UserRole, nao de uma coluna fixa em User: isso permite que um mesmo
+// usuario tenha papeis diferentes em organizadores diferentes (ex: alguem que
+// e ORGANIZER_STAFF de um organizador nunca precisa de uma segunda conta).
+//
+// Deliberadamente NAO ha uma tabela `Permission` dinamica: os 4 papeis do
+// RoleKey sao fixos e checados em codigo (guards do NestJS). Uma tabela de
+// permissoes granulares so se paga quando admins precisam compor papeis
+// customizados em runtime — nao e um requisito do backlog atual, entao
+// adiciona-la agora seria complexidade sem uso real.
+
+model User {
+  id              String     @id @default(cuid())
+  email           String     @unique
+  passwordHash    String
+  fullName        String
+  phone           String?
+  status          UserStatus @default(PENDING_VERIFICATION)
+  emailVerifiedAt DateTime?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  deletedAt       DateTime?
+
+  roles             UserRole[]
+  bookings          Booking[]
+  notifications     Notification[]
+  auditLogs         AuditLog[] @relation("AuditLogActor")
+  checkInsPerformed CheckIn[] @relation("CheckInStaff")
+
+  @@index([status])
+  @@map("users")
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  key         RoleKey  @unique
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  userRoles UserRole[]
+
+  @@map("roles")
+}
+
+/// Atribuicao de um papel a um usuario, opcionalmente escopada a um
+/// organizador (ORGANIZER_ADMIN/ORGANIZER_STAFF sempre tem organizerId;
+/// PASSENGER/PLATFORM_ADMIN sempre tem organizerId nulo).
+model UserRole {
+  id          String   @id @default(cuid())
+  userId      String
+  roleId      String
+  organizerId String?
+  createdAt   DateTime @default(now())
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      Role       @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  organizer Organizer? @relation(fields: [organizerId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId, organizerId])
+  @@index([organizerId])
+  @@map("user_roles")
+}
+
+// ============================================================================
+// ORGANIZERS
+// ============================================================================
+
+model Organizer {
+  id         String          @id @default(cuid())
+  name       String
+  slug       String          @unique
+  legalName  String?
+  email      String          @unique
+  phone      String?
+  status     OrganizerStatus @default(PENDING)
+  approvedAt DateTime?
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+
+  userRoles UserRole[]
+  ships     Ship[]
+  cruises   Cruise[]
+  coupons   Coupon[]
+
+  @@index([status])
+  @@map("organizers")
+}
+
+// ============================================================================
+// SHIPS / DECKS / CABINS
+// ============================================================================
+// Ship pertence a um Organizer (nao ha frota compartilhada entre organizadores
+// na v1 — ver docs/product/BACKLOG.md sobre o cadastro mestre de navios do
+// admin global, que aqui significa visibilidade/moderacao sobre todos os
+// navios, nao propriedade compartilhada).
+
+model Ship {
+  id                String    @id @default(cuid())
+  organizerId       String
+  name              String
+  imoNumber         String?   @unique
+  description       String?
+  yearBuilt         Int?
+  passengerCapacity Int
+  coverImageUrl     String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  /// Navio "aposentado" — nao soft-delete generico: cruzeiros/reservas
+  /// historicos continuam intactos e consultaveis, o navio so some de listas
+  /// de navios ativos.
+  deletedAt         DateTime?
+
+  organizer       Organizer       @relation(fields: [organizerId], references: [id], onDelete: Restrict)
+  decks           Deck[]
+  cabinCategories CabinCategory[]
+  venues          Venue[]
+  restaurants     Restaurant[]
+  cruises         Cruise[]
+
+  @@index([organizerId])
+  @@map("ships")
+}
+
+model Deck {
+  id          String   @id @default(cuid())
+  shipId      String
+  number      Int
+  name        String?
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  ship        Ship         @relation(fields: [shipId], references: [id], onDelete: Cascade)
+  cabins      Cabin[]
+  venues      Venue[]
+  restaurants Restaurant[]
+
+  @@unique([shipId, number])
+  @@map("decks")
+}
+
+/// Categoria de cabine no nivel do navio (tamanho/comodidades). O preco por
+/// categoria e especifico de cada cruzeiro — ver CruiseCabinPricing.
+model CabinCategory {
+  id           String   @id @default(cuid())
+  shipId       String
+  name         String
+  slug         String
+  description  String?
+  maxOccupancy Int
+  sizeSqm      Decimal? @db.Decimal(6, 2)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  ship     Ship                 @relation(fields: [shipId], references: [id], onDelete: Cascade)
+  cabins   Cabin[]
+  pricings CruiseCabinPricing[]
+
+  @@unique([shipId, slug])
+  @@map("cabin_categories")
+}
+
+model Cabin {
+  id              String      @id @default(cuid())
+  deckId          String
+  cabinCategoryId String
+  code            String
+  /// Estado operacional da cabine — preferido a soft-delete: uma cabine em
+  /// manutencao ainda existe fisicamente e pode voltar a ficar ACTIVE.
+  status          CabinStatus @default(ACTIVE)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  deck          Deck          @relation(fields: [deckId], references: [id], onDelete: Restrict)
+  cabinCategory CabinCategory @relation(fields: [cabinCategoryId], references: [id], onDelete: Restrict)
+  bookings      Booking[]
+
+  @@unique([deckId, code])
+  @@index([cabinCategoryId])
+  @@map("cabins")
+}
+
+// ============================================================================
+// PORTS / CRUISES / ITINERARIES
+// ============================================================================
+
+/// Dado de referencia compartilhado entre todos os organizadores (um porto
+/// nao pertence a ninguem).
+model Port {
+  id        String   @id @default(cuid())
+  name      String
+  country   String
+  unLocode  String?  @unique
+  timezone  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  itineraryStops        ItineraryStop[]
+  embarkationCruises    Cruise[]        @relation("CruiseEmbarkationPort")
+  disembarkationCruises Cruise[]        @relation("CruiseDisembarkationPort")
+
+  @@map("ports")
+}
+
+model Cruise {
+  id                   String       @id @default(cuid())
+  organizerId          String
+  shipId               String
+  title                String
+  slug                 String       @unique
+  theme                String
+  description          String?
+  status               CruiseStatus @default(DRAFT)
+  embarkationDate      DateTime
+  disembarkationDate   DateTime
+  embarkationPortId    String
+  disembarkationPortId String
+  coverImageUrl        String?
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+
+  organizer          Organizer @relation(fields: [organizerId], references: [id], onDelete: Restrict)
+  ship               Ship      @relation(fields: [shipId], references: [id], onDelete: Restrict)
+  embarkationPort    Port      @relation("CruiseEmbarkationPort", fields: [embarkationPortId], references: [id], onDelete: Restrict)
+  disembarkationPort Port      @relation("CruiseDisembarkationPort", fields: [disembarkationPortId], references: [id], onDelete: Restrict)
+
+  itineraryStops ItineraryStop[]
+  cabinPricings  CruiseCabinPricing[]
+  events         Event[]
+  experiences    Experience[]
+  bookings       Booking[]
+  coupons        Coupon[]
+
+  @@index([organizerId])
+  @@index([shipId])
+  @@index([status])
+  @@map("cruises")
+}
+
+/// Um dia da viagem. portId e opcional para representar "dia no mar" (sem
+/// escala em porto nenhum).
+model ItineraryStop {
+  id               String    @id @default(cuid())
+  cruiseId         String
+  portId           String?
+  dayNumber        Int
+  arrivalAt        DateTime?
+  departureAt      DateTime?
+  isEmbarkation    Boolean   @default(false)
+  isDisembarkation Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  cruise Cruise @relation(fields: [cruiseId], references: [id], onDelete: Cascade)
+  port   Port?  @relation(fields: [portId], references: [id], onDelete: Restrict)
+
+  @@unique([cruiseId, dayNumber])
+  @@index([portId])
+  @@map("itinerary_stops")
+}
+
+/// Preco de uma categoria de cabine PARA UM cruzeiro especifico (sailing) —
+/// o mesmo navio/categoria pode ter precos diferentes em cruzeiros diferentes.
+model CruiseCabinPricing {
+  id                 String   @id @default(cuid())
+  cruiseId           String
+  cabinCategoryId    String
+  price              Decimal  @db.Decimal(10, 2)
+  currency           String   @default("BRL")
+  cancellationPolicy String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  cruise        Cruise        @relation(fields: [cruiseId], references: [id], onDelete: Cascade)
+  cabinCategory CabinCategory @relation(fields: [cabinCategoryId], references: [id], onDelete: Restrict)
+
+  @@unique([cruiseId, cabinCategoryId])
+  @@map("cruise_cabin_pricings")
+}
+
+// ============================================================================
+// VENUES / ARTISTS / EVENTS / EXPERIENCES
+// ============================================================================
+
+/// Espaco fisico a bordo onde eventos acontecem (teatro, lounge, deck).
+model Venue {
+  id          String   @id @default(cuid())
+  shipId      String
+  deckId      String?
+  name        String
+  description String?
+  capacity    Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  ship   Ship    @relation(fields: [shipId], references: [id], onDelete: Cascade)
+  deck   Deck?   @relation(fields: [deckId], references: [id], onDelete: SetNull)
+  events Event[]
+
+  @@unique([shipId, name])
+  @@map("venues")
+}
+
+/// Dado compartilhado (nao pertence a um organizador) — a mesma banda/DJ
+/// pode se apresentar em cruzeiros de organizadores diferentes.
+model Artist {
+  id        String   @id @default(cuid())
+  name      String
+  bio       String?
+  imageUrl  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  events Event[]
+
+  @@map("artists")
+}
+
+model Event {
+  id          String        @id @default(cuid())
+  cruiseId    String
+  venueId     String
+  artistId    String?
+  title       String
+  description String?
+  category    EventCategory @default(OTHER)
+  startAt     DateTime
+  endAt       DateTime
+  capacity    Int?
+  /// Incluso na tarifa do cruzeiro vs. experiencia paga a parte.
+  isIncluded  Boolean       @default(true)
+  price       Decimal?      @db.Decimal(10, 2)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  cruise Cruise  @relation(fields: [cruiseId], references: [id], onDelete: Cascade)
+  venue  Venue   @relation(fields: [venueId], references: [id], onDelete: Restrict)
+  artist Artist? @relation(fields: [artistId], references: [id], onDelete: SetNull)
+
+  @@index([cruiseId])
+  @@index([venueId])
+  @@index([artistId])
+  @@map("events")
+}
+
+// ============================================================================
+// RESTAURANTS
+// ============================================================================
+
+model Restaurant {
+  id          String   @id @default(cuid())
+  shipId      String
+  deckId      String?
+  name        String
+  description String?
+  cuisineType String?
+  /// Incluso na tarifa (restaurante principal) vs. especialidade paga.
+  isIncluded  Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  ship        Ship         @relation(fields: [shipId], references: [id], onDelete: Cascade)
+  deck        Deck?        @relation(fields: [deckId], references: [id], onDelete: SetNull)
+  diningSlots DiningSlot[]
+
+  @@unique([shipId, name])
+  @@map("restaurants")
+}
+
+/// Janela de horario recorrente do restaurante, com capacidade — equivalente
+/// a "mesas" sem precisar modelar mesa a mesa (nao ha reserva por mesa na v1).
+model DiningSlot {
+  id           String   @id @default(cuid())
+  restaurantId String
+  label        String
+  startTime    DateTime @db.Time
+  endTime      DateTime @db.Time
+  capacity     Int
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@unique([restaurantId, label])
+  @@map("dining_slots")
+}
+
+// ============================================================================
+// EXPERIENCES
+// ============================================================================
+
+/// Experiencia paga/inclusa vinculada ao cruzeiro (tour, aula, degustacao) —
+/// distinta de Event (que tem local/horario fixo a bordo tipo show).
+model Experience {
+  id          String   @id @default(cuid())
+  cruiseId    String
+  title       String
+  description String?
+  category    String?
+  price       Decimal? @db.Decimal(10, 2)
+  capacity    Int?
+  isIncluded  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  cruise Cruise @relation(fields: [cruiseId], references: [id], onDelete: Cascade)
+
+  @@index([cruiseId])
+  @@map("experiences")
+}
+
+// ============================================================================
+// BOOKINGS / GUESTS / PAYMENTS / TICKETS / CHECK-INS / COUPONS
+// ============================================================================
+// Modelado agora para integridade referencial completa do dominio, mas SEM
+// logica de negocio nem dados de seed (ver docs/product/BACKLOG.md — o fluxo
+// de reserva/pagamento e a proxima etapa de implementacao, nao esta).
+
+model Booking {
+  id                 String        @id @default(cuid())
+  userId             String
+  cruiseId           String
+  cabinId            String
+  couponId           String?
+  status             BookingStatus @default(PENDING)
+  totalAmount        Decimal       @db.Decimal(10, 2)
+  discountAmount     Decimal?      @db.Decimal(10, 2)
+  currency           String        @default("BRL")
+  /// Bloqueio temporario da cabine durante o checkout (ver ADR de arquitetura
+  /// sobre hold de cabine via Redis) — expirado, a reserva volta para
+  /// disponivel se nunca sair de PENDING.
+  holdExpiresAt      DateTime?
+  confirmedAt        DateTime?
+  cancelledAt        DateTime?
+  cancellationReason String?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Restrict)
+  cruise Cruise  @relation(fields: [cruiseId], references: [id], onDelete: Restrict)
+  cabin  Cabin   @relation(fields: [cabinId], references: [id], onDelete: Restrict)
+  coupon Coupon? @relation(fields: [couponId], references: [id], onDelete: SetNull)
+
+  guests        BookingGuest[]
+  payments      Payment[]
+  notifications Notification[]
+
+  @@index([userId])
+  @@index([cruiseId])
+  @@index([cabinId])
+  @@index([status])
+  @@map("bookings")
+}
+
+model BookingGuest {
+  id             String       @id @default(cuid())
+  bookingId      String
+  fullName       String
+  documentType   DocumentType
+  documentNumber String
+  birthDate      DateTime?
+  /// Titular da reserva (conta do usuario) vs. acompanhante.
+  isPrimary      Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  ticket  Ticket?
+
+  @@index([bookingId])
+  @@map("booking_guests")
+}
+
+model Payment {
+  id                     String        @id @default(cuid())
+  bookingId              String
+  method                 PaymentMethod
+  status                 PaymentStatus @default(PENDING)
+  amount                 Decimal       @db.Decimal(10, 2)
+  currency               String        @default("BRL")
+  /// Referencia da transacao simulada (equivalente ao ID do gateway real).
+  simulatedTransactionId String        @unique
+  paidAt                 DateTime?
+  createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([bookingId])
+  @@index([status])
+  @@map("payments")
+}
+
+/// Ingresso digital — um por hospede (nao por reserva), como um cartao de
+/// embarque nominal de verdade.
+model Ticket {
+  id             String       @id @default(cuid())
+  bookingGuestId String       @unique
+  qrCode         String       @unique
+  status         TicketStatus @default(ISSUED)
+  issuedAt       DateTime     @default(now())
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  bookingGuest BookingGuest @relation(fields: [bookingGuestId], references: [id], onDelete: Cascade)
+  checkIns     CheckIn[]
+
+  @@map("tickets")
+}
+
+/// Log de cada leitura do QR code — nao e unico por ticket de proposito:
+/// reembarque apos parada em porto gera um novo check-in para o mesmo ticket.
+model CheckIn {
+  id          String   @id @default(cuid())
+  ticketId    String
+  staffUserId String?
+  location    String?
+  checkedInAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  ticket    Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  staffUser User?  @relation("CheckInStaff", fields: [staffUserId], references: [id], onDelete: SetNull)
+
+  @@index([ticketId])
+  @@map("check_ins")
+}
+
+model Coupon {
+  id            String             @id @default(cuid())
+  organizerId   String?
+  cruiseId      String?
+  code          String             @unique
+  discountType  CouponDiscountType
+  discountValue Decimal            @db.Decimal(10, 2)
+  maxUses       Int?
+  usedCount     Int                @default(0)
+  validFrom     DateTime
+  validUntil    DateTime
+  isActive      Boolean            @default(true)
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  organizer Organizer? @relation(fields: [organizerId], references: [id], onDelete: Cascade)
+  cruise    Cruise?    @relation(fields: [cruiseId], references: [id], onDelete: Cascade)
+  bookings  Booking[]
+
+  @@index([organizerId])
+  @@map("coupons")
+}
+
+model Notification {
+  id        String              @id @default(cuid())
+  userId    String
+  bookingId String?
+  type      NotificationType
+  channel   NotificationChannel @default(IN_APP)
+  title     String
+  message   String
+  readAt    DateTime?
+  createdAt DateTime            @default(now())
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  booking Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([bookingId])
+  @@map("notifications")
+}
+
+/// Trilha de auditoria — append-only de proposito (sem updatedAt/soft delete).
+model AuditLog {
+  id          String   @id @default(cuid())
+  actorUserId String?
+  action      String
+  entityType  String
+  entityId    String
+  metadata    Json?
+  ipAddress   String?
+  createdAt   DateTime @default(now())
+
+  actorUser User? @relation("AuditLogActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId])
+  @@index([actorUserId])
+  @@map("audit_logs")
+}

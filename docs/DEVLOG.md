@@ -98,4 +98,121 @@ boot dos processos, chamada HTTP real), não apenas escrita. Os dois problemas a
 ao testar de verdade, o que reforça por que essa validação foi feita antes de reportar a tarefa
 como concluída.
 
+## 2026-09-02 — Revisão de bugs e reforço de testes no bootstrap
+
+**O quê:** revisão linha a linha de todo o código do bootstrap em busca de bugs reais, com
+testes de verdade (não só leitura) sempre que possível. Achados e correções:
+
+- **`pg.Pool` sem listener de erro** (`database.health-indicator.ts`): pool do Postgres não
+  tinha `.on('error', ...)`. Uma conexão ociosa que falhasse em background (ex: Postgres
+  reiniciando) derrubaria o processo Node inteiro — exatamente o crash que o health check deveria
+  evitar. Corrigido, com teste unitário novo confirmando que o listener é registrado.
+- **`ApiStatus` mostrava "conectada" em verde mesmo com `status: "error"`**: qualquer resposta
+  HTTP bem-sucedida do `/health` era tratada como saudável, mesmo quando o payload dizia que
+  banco/Redis estavam fora do ar — justamente o cenário mais comum em dev local sem Docker.
+  Corrigido para diferenciar "conectada e saudável" (verde) de "conectada mas degradada" (âmbar),
+  com teste cobrindo o novo caso.
+- **`node_modules` local vazando para dentro das imagens Docker**: não existia `.dockerignore`.
+  `COPY . .` nos Dockerfiles copiaria o `node_modules` do Windows (binários nativos incompatíveis
+  com o container Linux), `.git/`, `.env` (segredos) e build artifacts para o contexto de build.
+  Criado `.dockerignore` na raiz.
+- **Web Docker: servidor bindava só em `localhost`**: o `server.js` gerado pelo output
+  `standalone` do Next.js escuta em `localhost` por padrão — o mapeamento de porta do Docker
+  (`-p 3000:3000`) não alcançaria a app de fora do container. Corrigido com
+  `ENV HOSTNAME="0.0.0.0"` no `web.Dockerfile` (gotcha documentado do próprio Next.js).
+- **`turbo run build typecheck` em paralelo quebrava com corrida real**: reproduzido de propósito
+  — `next build` apaga/regera `.next/types` enquanto `tsc --noEmit` tentava ler os mesmos
+  arquivos (`TS6053: File not found`). Descoberto também que o `next build` **reescreve sozinho**
+  o `tsconfig.json` para readicionar esse include — corrigir removendo a entrada não seria
+  durável. Corrigido com um `tsconfig.typecheck.json` separado, dedicado ao script `typecheck`,
+  que nunca toca em `.next`. Confirmado reproduzindo a corrida 3x depois da correção (sem falha).
+- **Vitest sem cleanup do DOM entre testes**: sem `test.globals: true`, o Testing Library não
+  registra cleanup automático — DOM de um teste vazava para o próximo (`getByText` encontrava
+  múltiplos elementos). Corrigido com `cleanup()` explícito em `afterEach` no `setup.ts`.
+- **CI: job de E2E nunca subia o servidor web**: buildava o app mas nunca rodava `next start`
+  antes do Playwright tentar acessá-lo. Corrigido com `webServer` no `playwright.config.ts`
+  (reaproveita um `pnpm dev` já rodando localmente; sempre sobe fresco no CI).
+- **CI: portas erradas nos testes de integração**: `docker-compose.test.yml` expõe Postgres/Redis
+  em `5433`/`6380`, mas nada definia `DATABASE_URL`/`REDIS_URL` para os passos `pnpm db:migrate`/
+  `pnpm test:integration` — sem isso, cairiam nos defaults de dev (`5432`/`6379`, nada escutando
+  ali) ou falhariam a validação de env. Corrigido com `env:` explícito no job, batendo com as
+  portas reais do compose de teste.
+- **`next start` incompatível com `output: "standalone"`**: o próprio Next avisou em runtime. O
+  script `start` foi trocado para `node .next/standalone/apps/web/server.js`, e como o output
+  standalone não inclui `public/`/`.next/static`, um script (`copy-standalone-assets.mjs`) foi
+  adicionado ao `build` para copiá-los para perto do server — sem isso, CSS/assets estáticos
+  dariam 404 ao rodar `pnpm start` localmente (o Docker já fazia essa cópia certo, via `COPY`
+  separados no Dockerfile).
+
+**Testado de verdade:** suíte completa (`lint`, `typecheck`, `build`, `test`) rodou limpa via
+Turborepo depois de cada correção; a condição de corrida do typecheck foi reproduzida e corrigida
+com confirmação em 3 execuções separadas; instalei o Chromium do Playwright e rodei os testes E2E
+de verdade — inclusive um novo teste que sobe a API real ao lado do web e confirma que o fetch
+`/health` do browser resolve para um estado conclusivo (não fica preso em "carregando"), provando
+a integração real entre os dois serviços, não apenas cada um isoladamente.
+
+**Por quê:** o pedido foi explicitamente para procurar erros/bugs e testar, não apenas reler o
+código. A maioria dos achados acima (a corrida do typecheck, o `next start` incompatível, o
+`.dockerignore` ausente) só apareceu ao efetivamente rodar os comandos em cenários realistas —
+reforça que "compilou" e "os testes que eu escrevi passam" não são a mesma coisa que "está livre
+de bugs".
+
+## 2026-09-02 — Camada de persistência completa (modelagem, migrations, seed)
+
+**O quê:** modelado o banco de dados relacional completo do SeaPass em `schema.prisma` — 26
+models cobrindo auth/RBAC (User, Role, UserRole), organizadores, navios/decks/cabines/categorias,
+cruzeiros/itinerário/portos/preço por categoria, venues/artistas/eventos, restaurantes/dining
+slots, experiências, e o cluster de reservas (Booking, BookingGuest, Payment, Ticket, CheckIn,
+Coupon, Notification, AuditLog) — este último modelado para integridade referencial completa,
+mas sem logica de negocio nem dados de seed, conforme pedido.
+
+Decisões de modelagem deliberadas (explicadas em detalhe na resposta ao usuário): papéis via
+tabela `Role` + `UserRole` (escopada a organizador quando aplicável) em vez de uma coluna enum
+fixa em `User`, sem uma tabela `Permission` dinâmica separada (justificado — 4 papéis fixos não
+precisam de permissões compostas em runtime); `Cabin.status` (enum) em vez de soft-delete
+genérico; `ItineraryStop.portId` opcional para representar dias no mar; `CruiseCabinPricing`
+como entidade própria (preço é por cruzeiro, não fixo na categoria); `Coupon` referenciado
+diretamente por `Booking.couponId` em vez de uma tabela de junção de resgate.
+
+**Testado de ponta a ponta com infraestrutura real** (não só schema válido): instalei
+`embedded-postgres` e `redis-memory-server` num diretório temporário fora do repo — um Postgres
+18 e um Redis reais rodando localmente sem Docker. Com eles:
+
+- `prisma migrate dev --name init` criou e aplicou a migration inicial de verdade.
+- `prisma migrate deploy` confirmado como no-op correto em cima da mesma migration (simula o
+  passo de release do CI).
+- `pnpm db:seed` populado com sucesso e **confirmado idempotente** (rodado 2x, contagem de linhas
+  igual, sem duplicatas) — 5 usuários, 4 papéis, 5 atribuições de papel, 2 organizadores, 1 navio,
+  4 decks, 4 categorias de cabine, 22 cabines, 3 portos, 1 cruzeiro publicado, itinerário de 5
+  dias (incluindo 1 dia no mar sem porto), 4 preços por categoria, 3 venues, 2 artistas, 4
+  eventos, 2 restaurantes, 3 dining slots, 3 experiências, **0 bookings** (conforme pedido).
+- `GET /health` finalmente confirmado retornando `200` com `database: up` e `redis: up` — a
+  primeira vez nesta conversa com infraestrutura real de verdade (até aqui só tinha sido
+  verificado o caminho degradado, sem Postgres/Redis).
+- Teste de integração da API (`pnpm test:integration`, que precisa de banco/Redis reais) rodado
+  pela primeira vez de verdade — passou com `200`.
+
+**Dois bugs reais encontrados e corrigidos durante a implementação:**
+
+1. **Chave composta com coluna nullable não funciona no `upsert`/`findUnique` do Prisma Client**:
+   `UserRole.organizerId` é opcional (papéis de passageiro/admin global não têm organizador), mas
+   o tipo gerado pelo Prisma para `@@unique([userId, roleId, organizerId])` exige
+   `organizerId: string` — não aceita `null`, mesmo a coluna sendo nullable no banco (o
+   constraint SQL funciona normalmente). Corrigido no seed com `findFirst` + `create`
+   condicional em vez de `upsert` por chave composta.
+2. **`noUncheckedIndexedAccess` (que a própria base de tsconfig já define) pegou acessos por
+   índice em `Record<string, string>` no seed** (`decks[numero]`, `categories[slug]`) que
+   poderiam ser `undefined` — corrigido com checagens explícitas que lançam erro claro em vez de
+   deixar passar um `undefined` silencioso.
+
+Também: `PrismaService`/`PrismaModule` restaurados e o health check do banco voltou a usar
+Prisma em vez do `pg` puro (ver [ADR-0004](architecture/decisions/0004-prisma-reinstated-with-domain-model.md),
+que resolve o que o [ADR-0002](architecture/decisions/0002-database-health-check-without-prisma-model.md)
+tinha deixado como pendência).
+
+**Por quê:** modelagem "profissional" pedida explicitamente — cada decisão de schema (PK, FK,
+índice, unique constraint, cardinalidade) foi pensada e documentada, não gerada por padrão. E
+testar contra infraestrutura real (em vez de só validar sintaxe) foi o que revelou os dois bugs
+acima, que uma verificação só-de-schema não pegaria.
+
 <!-- Novas entradas são adicionadas ao final, em ordem cronológica, cada uma com data, "O quê" e "Por quê". -->
