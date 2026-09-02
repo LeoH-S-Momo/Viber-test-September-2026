@@ -206,6 +206,9 @@ importers:
         specifier: ^3.23.8
         version: 3.25.76
     devDependencies:
+      '@seapass/config':
+        specifier: workspace:*
+        version: link:../config
       tsup:
         specifier: ^8.3.5
         version: 8.5.1(jiti@2.7.0)(postcss@8.5.26)(typescript@5.9.3)

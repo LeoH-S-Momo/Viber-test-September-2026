@@ -1,7 +1,7 @@
-import { Injectable, OnModuleDestroy } from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
-import { HealthCheckError, HealthIndicator, HealthIndicatorResult } from "@nestjs/terminus";
-import { Pool } from "pg";
+import { Injectable, OnModuleDestroy } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { HealthCheckError, HealthIndicator, HealthIndicatorResult } from '@nestjs/terminus';
+import { Pool } from 'pg';
 
 /**
  * Verifica conectividade com o Postgres via driver puro (pg), nao via Prisma:
@@ -17,16 +17,16 @@ export class DatabaseHealthIndicator extends HealthIndicator implements OnModule
 
   constructor(configService: ConfigService) {
     super();
-    this.pool = new Pool({ connectionString: configService.getOrThrow<string>("DATABASE_URL") });
+    this.pool = new Pool({ connectionString: configService.getOrThrow<string>('DATABASE_URL') });
   }
 
   async isHealthy(key: string): Promise<HealthIndicatorResult> {
     try {
-      await this.pool.query("SELECT 1");
+      await this.pool.query('SELECT 1');
       return this.getStatus(key, true);
     } catch (error) {
       throw new HealthCheckError(
-        "Database check failed",
+        'Database check failed',
         this.getStatus(key, false, { message: (error as Error).message }),
       );
     }

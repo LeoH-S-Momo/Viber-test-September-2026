@@ -1,11 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
-import { ApiStatus } from "@/components/api-status";
-import * as healthService from "@/services/health.service";
+import { describe, expect, it, vi } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
+import { ApiStatus } from '@/components/api-status';
+import * as healthService from '@/services/health.service';
 
-describe("ApiStatus", () => {
-  it("shows the API status once the health check resolves", async () => {
-    vi.spyOn(healthService, "getApiHealth").mockResolvedValue({ status: "ok" });
+describe('ApiStatus', () => {
+  it('shows the API status once the health check resolves', async () => {
+    vi.spyOn(healthService, 'getApiHealth').mockResolvedValue({ status: 'ok' });
 
     render(<ApiStatus />);
 
@@ -16,8 +16,8 @@ describe("ApiStatus", () => {
     });
   });
 
-  it("shows an offline message when the health check fails", async () => {
-    vi.spyOn(healthService, "getApiHealth").mockRejectedValue(new Error("network error"));
+  it('shows an offline message when the health check fails', async () => {
+    vi.spyOn(healthService, 'getApiHealth').mockRejectedValue(new Error('network error'));
 
     render(<ApiStatus />);
 

@@ -235,9 +235,12 @@ seapass/
 │       │   ├── config/                 # env schema (Zod) + carregamento tipado
 │       │   ├── database/
 │       │   │   └── prisma/
-│       │   │       ├── schema.prisma
+│       │   │       ├── schema.prisma   # sem models ainda — ver ADR-0002
 │       │   │       ├── migrations/
 │       │   │       └── seed.ts
+│       │   ├── redis/                  # RedisService (ioredis) — infra, nao um modulo de negocio
+│       │   ├── health/                 # GET /health (Terminus) — infra, nao um modulo de negocio
+│       │   │   └── indicators/
 │       │   ├── jobs/                   # processors BullMQ (fila sobre Redis)
 │       │   ├── main.ts
 │       │   └── app.module.ts

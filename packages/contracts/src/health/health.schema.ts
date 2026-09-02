@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from 'zod';
 
 /**
  * Contrato deliberadamente pouco restritivo: reflete o formato padrao do

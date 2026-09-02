@@ -1,9 +1,9 @@
-import type { NextConfig } from "next";
+import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
-  output: "standalone",
+  output: 'standalone',
   reactStrictMode: true,
-  transpilePackages: ["@seapass/contracts"],
+  transpilePackages: ['@seapass/contracts'],
 };
 
 export default nextConfig;

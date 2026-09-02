@@ -52,4 +52,50 @@ Cada escolha documentada com a alternativa considerada e o motivo de ter sido de
 
 ---
 
+## 2026-09-02 — Bootstrap completo (monorepo, frontend, backend, infra)
+
+**O quê:** implementado e **testado de ponta a ponta** o bootstrap do SeaPass, sem nenhuma
+funcionalidade de negócio:
+
+- `packages/config` — presets reais de ESLint (flat config) e Prettier.
+- `packages/contracts` — buildado com `tsup` (cjs+esm+dts); primeiro schema real
+  (`HealthStatusSchema`), consumido por `apps/web` e usado para tipar a resposta do health check.
+- `apps/api` (NestJS) — `main.ts`, `app.module.ts`, `ConfigModule` com validação de env via Zod
+  (`src/config/env.schema.ts`), `nestjs-pino` para logs estruturados, `RedisService` (ioredis)
+  resiliente a falha de conexão, `GET /health` (`@nestjs/terminus`) checando Postgres (via `pg`)
+  e Redis, Swagger em `/docs`, testes unitário e de integração do health check.
+- `apps/web` (Next.js 15 + Tailwind v4) — layout raiz, página inicial em `(public)/page.tsx`
+  mostrando o status da API em tempo real (`ApiStatus`, client component com fetch para
+  `/health`), testes unitários (Vitest + Testing Library) e config de E2E (Playwright).
+- Docker: `infra/docker/api.Dockerfile` usa `pnpm deploy` (mecanismo oficial do pnpm para
+  monorepos) para gerar uma pasta self-contained; `web.Dockerfile` usa o output `standalone` do
+  Next.js. Ambos ajustados depois de identificar que copiar apenas parte do `node_modules`
+  simlinkado do pnpm entre estágios do Docker quebra a resolução de dependências.
+- `.env`/`.env.local` locais criados a partir dos `.env.example` para testar o boot de verdade.
+
+**Testado de verdade (não apenas escrito):** `pnpm install`, `pnpm lint`, `pnpm typecheck`,
+`pnpm build` e `pnpm test` rodando limpos nos 3 workspaces com código (api, web, contracts) via
+Turborepo; API buildada e iniciada como processo real (`node dist/main.js`); frontend rodando em
+modo dev real (`next dev`); `pnpm dev` na raiz subindo os dois juntos; `GET /health` retornando
+`503` com o motivo de cada dependência indisponível quando Postgres/Redis não estão no ar (sem
+derrubar o processo) e `200` no `/docs` (Swagger).
+
+**Duas decisões técnicas corrigidas durante a implementação (documentadas como ADR):**
+
+1. **Prisma recusa gerar client com zero models** ([ADR-0002](architecture/decisions/0002-database-health-check-without-prisma-model.md)) —
+   descoberto ao tentar rodar `prisma generate` com o `schema.prisma` vazio (só
+   datasource+generator, sem nenhum model, já que nenhuma funcionalidade de negócio foi
+   implementada). Não era uma decisão arquitetural anterior, mas um detalhe de implementação
+   deste bootstrap que se provou inviável. Correção: o health check do banco usa o driver `pg`
+   puro por enquanto; `PrismaService` será adicionado junto com o primeiro model de domínio.
+2. **`next build` (standalone) falha no Windows sem symlink** ([ADR-0003](architecture/decisions/0003-pnpm-hoisted-node-linker-on-windows.md)) —
+   `EPERM` ao tentar recriar symlinks do `node_modules` do pnpm. Correção: `.npmrc` com
+   `node-linker=hoisted` na raiz. Não afeta `pnpm dev`, builds Docker (Linux) nem o CI (Ubuntu).
+
+**Por quê:** o pedido explícito era "quero que frontend e backend consigam subir localmente" —
+por isso cada peça foi validada rodando de verdade (instalação, lint, typecheck, build, testes,
+boot dos processos, chamada HTTP real), não apenas escrita. Os dois problemas acima só apareceram
+ao testar de verdade, o que reforça por que essa validação foi feita antes de reportar a tarefa
+como concluída.
+
 <!-- Novas entradas são adicionadas ao final, em ordem cronológica, cada uma com data, "O quê" e "Por quê". -->

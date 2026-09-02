@@ -1,11 +1,11 @@
-import { Controller, Get } from "@nestjs/common";
-import { ApiTags } from "@nestjs/swagger";
-import { HealthCheck, HealthCheckService } from "@nestjs/terminus";
-import { DatabaseHealthIndicator } from "./indicators/database.health-indicator";
-import { RedisHealthIndicator } from "./indicators/redis.health-indicator";
+import { Controller, Get } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
+import { HealthCheck, HealthCheckService } from '@nestjs/terminus';
+import { DatabaseHealthIndicator } from './indicators/database.health-indicator';
+import { RedisHealthIndicator } from './indicators/redis.health-indicator';
 
-@ApiTags("health")
-@Controller("health")
+@ApiTags('health')
+@Controller('health')
 export class HealthController {
   constructor(
     private readonly health: HealthCheckService,
@@ -17,8 +17,8 @@ export class HealthController {
   @HealthCheck()
   check() {
     return this.health.check([
-      () => this.databaseIndicator.isHealthy("database"),
-      () => this.redisIndicator.isHealthy("redis"),
+      () => this.databaseIndicator.isHealthy('database'),
+      () => this.redisIndicator.isHealthy('redis'),
     ]);
   }
 }
