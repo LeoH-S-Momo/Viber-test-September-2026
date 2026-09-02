@@ -1,21 +1,19 @@
-# Build de producao do web (Next.js, standalone output). Multi-stage para imagem final enxuta.
-# Contexto de build deve ser a raiz do monorepo: `docker build -f infra/docker/web.Dockerfile .`
+# Build de producao do web (Next.js, output standalone). Contexto de build deve ser a
+# raiz do monorepo: `docker build -f infra/docker/web.Dockerfile -t seapass-web .`
+#
+# O output standalone do Next.js faz tracing de arquivos (via @vercel/nft) e ja resolve
+# as dependencias de workspace (@seapass/contracts) para arquivos reais dentro de
+# .next/standalone — nao precisa de `pnpm deploy` como a api.
 
 FROM node:20-alpine AS base
 RUN corepack enable
 WORKDIR /app
 
-FROM base AS deps
-COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
-COPY apps/web/package.json apps/web/package.json
-COPY packages/contracts/package.json packages/contracts/package.json
-COPY packages/ui/package.json packages/ui/package.json
-COPY packages/config/package.json packages/config/package.json
-RUN pnpm install --frozen-lockfile --filter @seapass/web...
-
-FROM deps AS build
+FROM base AS build
 COPY . .
-RUN pnpm --filter @seapass/web... build
+RUN pnpm install --frozen-lockfile
+RUN pnpm --filter @seapass/contracts build
+RUN pnpm --filter @seapass/web build
 
 FROM base AS runtime
 ENV NODE_ENV=production

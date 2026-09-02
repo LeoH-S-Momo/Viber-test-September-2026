@@ -5,6 +5,7 @@ Plataforma de comercialização e gestão de cruzeiros temáticos (teste técnic
 - Backlog do produto: [`docs/product/BACKLOG.md`](docs/product/BACKLOG.md)
 - Stack tecnológica e estrutura do monorepo: [`docs/architecture/stack-and-structure.md`](docs/architecture/stack-and-structure.md)
 - Decisões de arquitetura: [`docs/architecture/decisions/`](docs/architecture/decisions/)
+- Devlog (histórico do que foi feito e por quê): [`docs/DEVLOG.md`](docs/DEVLOG.md)
 
 ## Estrutura
 

@@ -3,6 +3,7 @@
   "globalDependencies": [".env"],
   "tasks": {
     "dev": {
+      "dependsOn": ["^build"],
       "cache": false,
       "persistent": true
     },

@@ -2,11 +2,14 @@
   "name": "@seapass/config",
   "private": true,
   "version": "0.1.0",
-  "description": "Configuracoes compartilhadas: ESLint, Prettier e tsconfig base para todos os workspaces",
-  "main": "./index.js",
+  "description": "Configuracoes compartilhadas: ESLint e Prettier para todos os workspaces (tsconfig base fica na raiz do monorepo)",
   "files": [
     "eslint-preset.cjs",
-    "prettier-preset.cjs",
-    "tsconfig.base.json"
-  ]
+    "prettier-preset.cjs"
+  ],
+  "dependencies": {
+    "@eslint/js": "^9.13.0",
+    "eslint-config-prettier": "^9.1.0",
+    "typescript-eslint": "^8.12.0"
+  }
 }

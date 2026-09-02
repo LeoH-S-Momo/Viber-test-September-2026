@@ -1,25 +1,26 @@
-# Build de producao da api (NestJS). Multi-stage para imagem final enxuta.
-# Contexto de build deve ser a raiz do monorepo: `docker build -f infra/docker/api.Dockerfile .`
+# Build de producao da api (NestJS). Contexto de build deve ser a raiz do monorepo:
+# `docker build -f infra/docker/api.Dockerfile -t seapass-api .`
+#
+# Usa `pnpm deploy` (mecanismo oficial do pnpm para monorepos) para produzir uma pasta
+# self-contained da api com as dependencias de workspace (@seapass/contracts) resolvidas
+# como arquivos reais, evitando o problema classico de symlinks de workspace quebrados
+# ao copiar apenas parte do node_modules entre estagios do Docker.
 
 FROM node:20-alpine AS base
 RUN corepack enable
 WORKDIR /app
 
-FROM base AS deps
-COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
-COPY apps/api/package.json apps/api/package.json
-COPY packages/contracts/package.json packages/contracts/package.json
-COPY packages/config/package.json packages/config/package.json
-RUN pnpm install --frozen-lockfile --filter @seapass/api...
-
-FROM deps AS build
+FROM base AS build
 COPY . .
-RUN pnpm --filter @seapass/api... build
+RUN pnpm install --frozen-lockfile
+RUN pnpm --filter @seapass/contracts build
+RUN pnpm --filter @seapass/api build
+RUN pnpm --filter @seapass/api deploy --prod /app/deploy
 
 FROM base AS runtime
 ENV NODE_ENV=production
-COPY --from=build /app/apps/api/dist ./dist
+COPY --from=build /app/deploy/dist ./dist
+COPY --from=build /app/deploy/node_modules ./node_modules
 COPY --from=build /app/apps/api/src/database/prisma ./prisma
-COPY --from=build /app/node_modules ./node_modules
 EXPOSE 3333
 CMD ["node", "dist/main.js"]

@@ -1,0 +1,12 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Nenhum model definido ainda. A modelagem do dominio (User, Organizer, Ship,
+// Cruise, Cabin, Booking, ...) sera adicionada na proxima etapa, seguindo o
+// modelo de dados descrito em docs/product/BACKLOG.md.
