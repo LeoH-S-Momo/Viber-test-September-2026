@@ -215,4 +215,74 @@ tinha deixado como pendência).
 testar contra infraestrutura real (em vez de só validar sintaxe) foi o que revelou os dois bugs
 acima, que uma verificação só-de-schema não pegaria.
 
+## 2026-09-02 — Autenticação e autorização completas (RBAC)
+
+**O quê:** implementado o sistema completo de auth do SeaPass para os 4 perfis (Passenger,
+Organizer Admin, Organizer Staff, Platform Admin):
+
+- **Auth**: cadastro (passageiro e organizador — este último cria `Organizer` com status
+  `PENDING`), login, logout, access token (JWT, 15 min) + refresh token (opaco, rotação com
+  detecção de reuso, cookie httpOnly), recuperação de senha em modo dev (token devolvido na
+  resposta/logado, nunca em produção), hash de senha com `bcryptjs`.
+- **RBAC**: `JwtAuthGuard` + `RolesGuard` globais ("protegido por padrão", `@Public()` como
+  opt-out), decorators `@Roles(...)`/`@CurrentUser()`, controle de posse de recurso explícito nos
+  services (ex: organizador só edita os próprios cruzeiros — 404, não 403, se não pertence).
+- **2 models novos** (`RefreshToken`, `PasswordResetToken`, guardados só como hash) + migration
+  real aplicada.
+- **8 módulos de recurso** (thin, pensados para exercitar o RBAC, não para implementar o sistema
+  de reservas): `auth`, `users`, `organizers` (convite de staff, ocupação, vendas),
+  `cruises` (catálogo público + CRUD do organizador), `events` (criação escopada ao cruzeiro),
+  `bookings`/`tickets` (leitura escopada ao próprio passageiro + check-in para staff), `admin`
+  (aprovar/suspender organizador, audit log).
+- `AuditLogService` passou a ser usado de verdade (registro, aprovação/suspensão de organizador).
+- Contratos Zod novos em `packages/contracts` para cada fluxo (auth, invite-staff, cruise, event,
+  check-in), compartilháveis com o frontend depois.
+
+**Testado de ponta a ponta com Postgres/Redis reais** (não só mocks): ~30 chamadas manuais via
+`curl` cobrindo cada cenário (cadastro, login, RBAC por papel, cross-organizador, refresh/rotação/
+reuso, logout, recuperação de senha) **antes** de escrever os testes automatizados — e cada bug
+real encontrado assim foi corrigido antes de formalizar em teste. Depois: 39 testes unitários
+(services, guards, pipe, util de organizerId) + 14 testes de integração reais (fluxo completo de
+auth + limites de RBAC, incluindo criar dois organizadores de verdade via API e provar que um não
+enxerga o cruzeiro do outro) — 53 testes, todos verdes.
+
+**Três bugs reais encontrados testando de verdade (não na teoria):**
+
+1. **`/health` passou a exigir autenticação** — esqueci de marcar `HealthController` com
+   `@Public()` ao tornar o `JwtAuthGuard` global. Pego imediatamente no primeiro `curl` manual
+   (retornou `401` em vez de `200`). Lembrete registrado no [ADR-0005](architecture/decisions/0005-auth-and-rbac-design.md)
+   sobre o custo de guards globais "seguros por padrão": exigem auditar toda rota pública já
+   existente ao introduzi-los.
+2. **`@UsePipes()` no nível do método valida TODOS os parâmetros, não só `@Body()`** — em todo
+   handler que também tinha `@CurrentUser()` (ex: `POST /organizers/me/staff`), o Zod tentava
+   validar o payload do JWT contra o schema do corpo e falhava. Descoberto testando o convite de
+   staff via `curl` ("password: Required, fullName: Required" mesmo enviando os dois). Corrigido
+   em todos os controllers trocando para `@Body(new ZodValidationPipe(Schema))` (pipe escopado ao
+   parâmetro, não ao método).
+3. **`noUncheckedIndexedAccess` pegou 3 bugs de tipo reais** antes mesmo de rodar: acesso a
+   `Prisma.InputJsonValue` mal tipado no audit log, `override` faltando no `JwtAuthGuard`, e
+   indexação de `Record` com uma chave possivelmente `undefined` no parser de duração
+   (`"15m"` → ms) — resolvido redesenhando com um union type `'s'|'m'|'h'|'d'` em vez de
+   `Record<string, number>` genérico.
+4. **O catálogo de papéis (`roles`) só existia via `pnpm db:seed`, e o CI nunca roda o seed** —
+   só `pnpm db:migrate` (ver `.github/workflows/ci.yml`, job `integration-tests`). Como todo
+   cadastro (`register`/`register/organizer`) faz `role.findUniqueOrThrow({ where: { key } })`,
+   **nenhum cadastro funcionaria em CI** mesmo com a migration aplicada — só não apareceu nos
+   testes locais porque o Postgres que eu uso para testar já tinha sido semeado numa etapa
+   anterior desta conversa. Achado ao revisar o próprio `ci.yml` de propósito, e confirmado
+   criando um banco novo, rodando só `prisma migrate deploy` (sem seed) e tentando `/auth/register`
+   contra ele. Corrigido movendo o catálogo de papéis para dentro de uma migration
+   (`20260902210000_seed_core_roles`, `INSERT ... ON CONFLICT DO NOTHING` — dado de referência
+   obrigatório, não dado de demonstração) e ajustando o teste de RBAC do admin para criar seu
+   próprio usuário `PLATFORM_ADMIN` via `UsersService` em vez de depender do usuário do seed.
+   Reproduzido o cenário exato do CI (banco novo → `migrate deploy` → suíte de integração inteira,
+   sem seed) e confirmado: 14/14 testes passam.
+
+**Por quê:** o pedido foi por um sistema "completo" de auth/autorização com proteção de rotas,
+RBAC e tratamento seguro de erros — a única forma de saber se isso é verdade (não só "parece
+certo") é bater nele de propósito: tentar acessar sem token, com o papel errado, com o recurso de
+outro organizador, reusar um refresh token revogado. Cada um desses ataques simulados encontrou
+algo — reforça o padrão já estabelecido nesta conversa de testar contra infraestrutura real antes
+de declarar algo pronto.
+
 <!-- Novas entradas são adicionadas ao final, em ordem cronológica, cada uma com data, "O quê" e "Por quê". -->

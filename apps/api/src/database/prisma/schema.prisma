@@ -133,14 +133,51 @@ model User {
   updatedAt       DateTime   @updatedAt
   deletedAt       DateTime?
 
-  roles             UserRole[]
-  bookings          Booking[]
-  notifications     Notification[]
-  auditLogs         AuditLog[] @relation("AuditLogActor")
-  checkInsPerformed CheckIn[] @relation("CheckInStaff")
+  roles               UserRole[]
+  bookings            Booking[]
+  notifications       Notification[]
+  auditLogs           AuditLog[]           @relation("AuditLogActor")
+  checkInsPerformed   CheckIn[]            @relation("CheckInStaff")
+  refreshTokens       RefreshToken[]
+  passwordResetTokens PasswordResetToken[]
 
   @@index([status])
   @@map("users")
+}
+
+/// Refresh token de sessao — opaco (nao e um JWT), guardado apenas como hash
+/// (HMAC-SHA256 com JWT_REFRESH_SECRET como pepper). Cada login/refresh gera
+/// uma linha nova; logout e rotacao marcam `revokedAt` em vez de apagar, para
+/// dar rastreabilidade e permitir detectar reuso de token revogado (possivel
+/// roubo de sessao).
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+/// Token de recuperacao de senha — mesma logica do RefreshToken (guardado
+/// como hash, nunca em texto puro). Uso unico: `usedAt` marcado no reset.
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_reset_tokens")
 }
 
 model Role {

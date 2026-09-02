@@ -1,6 +1,7 @@
 import { Controller, Get } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { HealthCheck, HealthCheckService } from '@nestjs/terminus';
+import { Public } from '../common/decorators/public.decorator';
 import { PrismaHealthIndicator } from './indicators/prisma.health-indicator';
 import { RedisHealthIndicator } from './indicators/redis.health-indicator';
 
@@ -13,6 +14,9 @@ export class HealthController {
     private readonly redisIndicator: RedisHealthIndicator,
   ) {}
 
+  // Usado por orquestradores (Docker, k8s, load balancer) para healthcheck —
+  // precisa ser publico, nunca deve exigir credenciais.
+  @Public()
   @Get()
   @HealthCheck()
   check() {

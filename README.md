@@ -4,6 +4,7 @@ Plataforma de comercialização e gestão de cruzeiros temáticos (teste técnic
 
 - Backlog do produto: [`docs/product/BACKLOG.md`](docs/product/BACKLOG.md)
 - Stack tecnológica e estrutura do monorepo: [`docs/architecture/stack-and-structure.md`](docs/architecture/stack-and-structure.md)
+- Autenticação, RBAC e matriz de permissões da API: [`docs/architecture/api-permissions.md`](docs/architecture/api-permissions.md)
 - Decisões de arquitetura: [`docs/architecture/decisions/`](docs/architecture/decisions/)
 - Devlog (histórico do que foi feito e por quê): [`docs/DEVLOG.md`](docs/DEVLOG.md)
 
@@ -74,6 +75,25 @@ Usuários de teste (senha para todos: `Seapass@123`):
 | `operador@rockinsea.com` | Operador do organizador "Rock in Sea" |
 | `passageiro1@example.com` / `passageiro2@example.com` | Passageiros |
 
+### Autenticação
+
+```bash
+# Cadastro de passageiro (retorna accessToken + seta cookie httpOnly de refresh)
+curl -X POST http://localhost:3333/auth/register -H "Content-Type: application/json" \
+  -d '{"email":"voce@example.com","password":"SenhaForte123","fullName":"Seu Nome"}'
+
+# Login
+curl -X POST http://localhost:3333/auth/login -H "Content-Type: application/json" \
+  -d '{"email":"admin@seapass.com","password":"Seapass@123"}'
+
+# Rota protegida — use o accessToken retornado acima
+curl http://localhost:3333/auth/me -H "Authorization: Bearer <accessToken>"
+```
+
+Ver [`docs/architecture/api-permissions.md`](docs/architecture/api-permissions.md) para a matriz
+completa de quem pode acessar cada endpoint (Passenger, Organizer Admin, Organizer Staff,
+Platform Admin), o design de refresh token e o fluxo de recuperação de senha em dev.
+
 ### Outros scripts úteis
 
 ```bash
@@ -100,7 +120,9 @@ pnpm test:e2e             # testes end-to-end do web (Playwright) — requer
 
 ## Status
 
-Fase atual: bootstrap do monorepo e camada de persistência concluídos — frontend e backend sobem
-localmente, banco modelado (26 tabelas) e migrado, seed de demonstração funcionando, health
-check e documentação de API no ar. Fluxo de reserva/pagamento ainda não implementado. Ver
-`docs/DEVLOG.md` para o histórico e `docs/product/BACKLOG.md` para o roadmap priorizado.
+Fase atual: bootstrap do monorepo, camada de persistência e autenticação/autorização concluídos —
+frontend e backend sobem localmente, banco modelado (28 tabelas) e migrado, seed de demonstração
+funcionando, auth completa (cadastro, login, refresh com rotação, logout, recuperação de senha)
+com RBAC por papel e por posse de recurso, health check e documentação de API no ar. Checkout e
+pagamento ainda não implementados. Ver `docs/DEVLOG.md` para o histórico e
+`docs/product/BACKLOG.md` para o roadmap priorizado.
