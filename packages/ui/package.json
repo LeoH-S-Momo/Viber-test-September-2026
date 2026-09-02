@@ -1,0 +1,12 @@
+{
+  "name": "@seapass/ui",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Design system compartilhado (componentes React reutilizaveis pelo site publico e paineis)",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
+  }
+}

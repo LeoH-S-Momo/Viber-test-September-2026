@@ -1,0 +1,23 @@
+{
+  "name": "@seapass/web",
+  "private": true,
+  "version": "0.1.0",
+  "description": "SeaPass — frontend Next.js (site publico, area do passageiro, painel do organizador, painel admin)",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@seapass/contracts": "workspace:*",
+    "@seapass/ui": "workspace:*"
+  },
+  "devDependencies": {
+    "@seapass/config": "workspace:*",
+    "typescript": "^5.6.0"
+  }
+}

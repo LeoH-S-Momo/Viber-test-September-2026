@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+env:
+  PNPM_VERSION: 9.12.0
+
+jobs:
+  lint-typecheck-unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "pnpm"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test -- --coverage
+
+  integration-tests:
+    runs-on: ubuntu-latest
+    needs: lint-typecheck-unit
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "pnpm"
+      - run: pnpm install --frozen-lockfile
+      - name: Start test infra
+        run: docker compose -f infra/docker-compose.test.yml up -d
+      - run: pnpm db:migrate
+      - run: pnpm test:integration
+      - name: Stop test infra
+        if: always()
+        run: docker compose -f infra/docker-compose.test.yml down -v
+
+  e2e-tests:
+    runs-on: ubuntu-latest
+    needs: integration-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "pnpm"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps
+      - name: Start full stack
+        run: docker compose -f infra/docker-compose.yml up -d
+      - run: pnpm build
+      - run: pnpm test:e2e
+      - name: Stop stack
+        if: always()
+        run: docker compose -f infra/docker-compose.yml down -v
+
+  docker-build:
+    runs-on: ubuntu-latest
+    needs: lint-typecheck-unit
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build api image
+        run: docker build -f infra/docker/api.Dockerfile -t seapass-api:${{ github.sha }} .
+      - name: Build web image
+        run: docker build -f infra/docker/web.Dockerfile -t seapass-web:${{ github.sha }} .

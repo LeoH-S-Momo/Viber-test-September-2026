@@ -1,0 +1,15 @@
+{
+  "name": "@seapass/contracts",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Schemas Zod e tipos TypeScript compartilhados entre apps/web e apps/api (contrato da API)",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^3.23.0"
+  }
+}

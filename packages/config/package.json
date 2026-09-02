@@ -1,0 +1,12 @@
+{
+  "name": "@seapass/config",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Configuracoes compartilhadas: ESLint, Prettier e tsconfig base para todos os workspaces",
+  "main": "./index.js",
+  "files": [
+    "eslint-preset.cjs",
+    "prettier-preset.cjs",
+    "tsconfig.base.json"
+  ]
+}
