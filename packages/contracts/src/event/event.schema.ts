@@ -16,3 +16,14 @@ export const CreateEventSchema = z.object({
   price: z.coerce.number().positive().optional(),
 });
 export type CreateEventInput = z.infer<typeof CreateEventSchema>;
+
+export const UpdateEventSchema = CreateEventSchema.omit({ cruiseId: true }).partial();
+export type UpdateEventInput = z.infer<typeof UpdateEventSchema>;
+
+export const EventQuerySchema = z.object({
+  cruiseId: z.string().optional(),
+  category: z
+    .enum(["SHOW", "WORKSHOP", "PARTY", "LECTURE", "MEET_AND_GREET", "OTHER"])
+    .optional(),
+});
+export type EventQuery = z.infer<typeof EventQuerySchema>;

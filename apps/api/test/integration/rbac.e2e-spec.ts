@@ -83,20 +83,31 @@ describe('RBAC (integration)', () => {
     const orgA = await registerOrganizer('orga');
     const orgB = await registerOrganizer('orgb');
 
-    // orgA cria um navio (via seed helper direto no banco, ja que ship/cabin ainda
-    // nao tem endpoint publico de escrita) para poder criar um cruzeiro de teste.
-    const ship = await prisma.ship.create({
-      data: { organizerId: orgA.organizerId, name: 'Navio de Teste', passengerCapacity: 100 },
-    });
+    // Port e dado de referencia curado pelo admin da plataforma (ver
+    // docs/architecture/api-permissions.md) — criado direto no banco aqui de
+    // proposito, nao e o que este teste esta verificando.
     const port = await prisma.port.create({
       data: { name: `Porto ${unique('port')}`, country: 'Brasil' },
     });
+
+    const shipRes = await request(server())
+      .post('/ships')
+      .set('Authorization', `Bearer ${orgA.accessToken}`)
+      .send({ name: 'Navio de Teste', passengerCapacity: 100 })
+      .expect(201);
+    const shipId = shipRes.body.id;
+
+    const categoryRes = await request(server())
+      .post(`/ships/${shipId}/cabin-categories`)
+      .set('Authorization', `Bearer ${orgA.accessToken}`)
+      .send({ name: 'Interna', maxOccupancy: 2 })
+      .expect(201);
 
     const createCruise = await request(server())
       .post('/cruises')
       .set('Authorization', `Bearer ${orgA.accessToken}`)
       .send({
-        shipId: ship.id,
+        shipId,
         title: `Cruzeiro ${unique('cruise')}`,
         theme: 'Teste',
         embarkationDate: '2027-05-01T12:00:00Z',
@@ -105,27 +116,50 @@ describe('RBAC (integration)', () => {
         disembarkationPortId: port.id,
       })
       .expect(201);
+    const cruiseId = createCruise.body.id;
 
-    // orgA consegue atualizar o proprio cruzeiro
+    // Sem itinerario/preco a publicacao e recusada (regra de negocio, nao RBAC).
     await request(server())
-      .patch(`/cruises/${createCruise.body.id}`)
+      .post(`/cruises/${cruiseId}/publish`)
       .set('Authorization', `Bearer ${orgA.accessToken}`)
-      .send({ status: 'PUBLISHED' })
-      .expect(200);
+      .expect(409);
 
-    // orgB NAO consegue — nem sabe que o recurso existe (404, nao 403)
     await request(server())
-      .patch(`/cruises/${createCruise.body.id}`)
+      .post(`/cruises/${cruiseId}/itinerary-stops`)
+      .set('Authorization', `Bearer ${orgA.accessToken}`)
+      .send({ portId: port.id, dayNumber: 1, isEmbarkation: true })
+      .expect(201);
+    await request(server())
+      .post(`/cruises/${cruiseId}/pricing`)
+      .set('Authorization', `Bearer ${orgA.accessToken}`)
+      .send({ cabinCategoryId: categoryRes.body.id, price: 1500 })
+      .expect(201);
+
+    // orgA consegue publicar o proprio cruzeiro
+    const published = await request(server())
+      .post(`/cruises/${cruiseId}/publish`)
+      .set('Authorization', `Bearer ${orgA.accessToken}`)
+      .expect(200);
+    expect(published.body.status).toBe('PUBLISHED');
+
+    // orgB NAO consegue editar/publicar/despublicar — nem sabe que o recurso existe (404, nao 403)
+    await request(server())
+      .patch(`/cruises/${cruiseId}`)
       .set('Authorization', `Bearer ${orgB.accessToken}`)
       .send({ title: 'Sequestrado' })
       .expect(404);
+    await request(server())
+      .post(`/cruises/${cruiseId}/unpublish`)
+      .set('Authorization', `Bearer ${orgB.accessToken}`)
+      .expect(404);
 
-    // orgB tambem nao pode usar o navio de orgA para criar um cruzeiro
+    // orgB tambem nao pode usar o navio de orgA para criar um cruzeiro — 404
+    // (nao 403), mesmo principio de nao revelar a existencia do recurso.
     await request(server())
       .post('/cruises')
       .set('Authorization', `Bearer ${orgB.accessToken}`)
       .send({
-        shipId: ship.id,
+        shipId,
         title: 'Nao deveria existir',
         theme: 'Teste',
         embarkationDate: '2027-06-01T12:00:00Z',
@@ -133,7 +167,14 @@ describe('RBAC (integration)', () => {
         embarkationPortId: port.id,
         disembarkationPortId: port.id,
       })
-      .expect(403);
+      .expect(404);
+
+    // O catalogo publico mostra o cruzeiro publicado, mas nao aparece para quem nao esta logado
+    // como se fosse de outro organizador — so confirma que esta visivel e com o preco certo.
+    const publicList = await request(server()).get('/cruises').expect(200);
+    const found = publicList.body.data.find((c: { id: string }) => c.id === cruiseId);
+    expect(found).toBeDefined();
+    expect(found.cabinPricings[0].price).toBe('1500');
   });
 
   it('organizer staff can check in a ticket but cannot invite other staff', async () => {

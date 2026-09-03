@@ -285,4 +285,63 @@ outro organizador, reusar um refresh token revogado. Cada um desses ataques simu
 algo — reforça o padrão já estabelecido nesta conversa de testar contra infraestrutura real antes
 de declarar algo pronto.
 
+## 2026-09-03 — Módulo de catálogo (Ships, Cruises e mais 10 entidades)
+
+**O quê:** implementado o módulo de catálogo completo — 12 entidades (Ships, Decks, Cabins,
+Cabin Categories, Cruises, Itinerary Stops, Ports, Events, Artists, Venues, Restaurants,
+Experiences), com **Cruises** como núcleo: criação, edição, publicação/despublicação (com regra
+de negócio real — precisa de itinerário e preço antes de publicar), consulta, listagem paginada,
+filtros (tema, destino, período, faixa de preço, organizador, status) e ordenação (inclusive por
+preço mínimo).
+
+**Arquitetura em 4 camadas** (pedido explícito desta etapa, registrado no
+[ADR-0006](architecture/decisions/0006-catalog-layering.md)): `presentation/` (controllers, só
+HTTP) → `application/` (services, casos de uso + checagem de posse por organizador) →
+`persistence/` (um repository por entidade, thin wrapper sobre Prisma), com `domain/` isolado de
+framework/Prisma para as duas peças que têm regra de negócio real testável isoladamente:
+`CruiseStatusPolicy` (transições DRAFT/PUBLISHED) e o utilitário de paginação. Módulos mais
+simples (`bookings`, `tickets`, `admin`) deliberadamente continuam com o padrão de 2 camadas —
+essa separação de 4 camadas não virou uma regra automática para todo módulo futuro, só onde há
+lógica real o bastante pra justificar (ADR explica o porquê).
+
+`src/modules/cruises/` e `src/modules/events/` (criados durante a etapa de auth) foram
+consolidados dentro do novo `catalog/`, mantendo as mesmas rotas (`/cruises`, `/events`) — nenhum
+cliente existente quebra.
+
+**Testado de ponta a ponta com Postgres/Redis reais**: ~40 chamadas manuais via `curl` cobrindo
+cada entidade e o fluxo completo de cruzeiro (criar → tentar publicar sem itinerário/preço e
+receber `409` → adicionar itinerário → adicionar preço → publicar → aparecer no catálogo público
+→ despublicar → sumir do catálogo) **antes** de formalizar em testes automatizados — mesmo padrão
+das etapas anteriores. Depois: 79 testes no total (58 unitários + 21 de integração), incluindo um
+novo `catalog.e2e-spec.ts` dedicado a filtros/paginação/ordenação com um fixture de 3 cruzeiros
+(2 publicados com preços/temas/destinos diferentes, 1 em rascunho) criado via API real, provando
+que rascunho nunca aparece no público e que a ordenação por preço funciona nos dois sentidos.
+
+**Dois achados reais durante a implementação:**
+
+1. **Prisma não ordena por agregado (`_min`/`_max`) de uma relação 1:N em `findMany`** — só
+   `_count`. Descoberto pelo `tsc` recusando `orderBy: { cabinPricings: { _min: { price } } }`
+   antes mesmo de rodar. Resolvido com `groupBy` (que Prisma *suporta* ordenar por aggregate) para
+   pegar os ids na ordem certa, seguido de um `findMany({ where: { id: { in } } })` reordenado em
+   memória (Prisma não preserva a ordem de um filtro `in`). Detalhado no ADR-0006.
+2. **Endpoint de preço por categoria não estava no pedido, mas era pré-requisito** — a própria
+   regra de negócio que implementei (`CruiseStatusPolicy.assertCanPublish` exige preço definido)
+   tornaria impossível publicar um cruzeiro pela API sem um jeito de definir esse preço. Adicionado
+   `POST /cruises/:id/pricing` (escopado ao organizador dono, categoria precisa ser do mesmo
+   navio) — sem isso, o fluxo de publicação documentado não seria demonstrável de ponta a ponta.
+
+**Uma falha de teste real, não de código:** ao reescrever o teste de RBAC para usar os novos
+endpoints (`POST /ships`, `/publish` em vez de `PATCH status`), um `expect(403)` copiado do teste
+antigo falhou com `404` — investigado e confirmado que o **código estava certo**: a checagem de
+posse do navio (`ShipsService.findOwnedByOrganizerOrThrow`) já segue o mesmo princípio de não
+revelar existência de recurso a quem não é dono (ADR-0005), então 404 é o comportamento correto e
+consistente; o teste antigo é que esperava o comportamento anterior ao ADR-0005. Corrigida a expectativa do
+teste, não o código.
+
+**Por quê:** o pedido foi por descoberta e gestão de conteúdo com separação arquitetural clara —
+a mesma disciplina das etapas anteriores (testar contra infraestrutura real antes de escrever
+teste automatizado, verificar cada suposição em vez de assumir) encontrou uma limitação real do
+Prisma e um pré-requisito de negócio que não estava no pedido original, ambos resolvidos antes de
+declarar a etapa pronta.
+
 <!-- Novas entradas são adicionadas ao final, em ordem cronológica, cada uma com data, "O quê" e "Por quê". -->

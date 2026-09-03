@@ -13,8 +13,7 @@ import { RolesGuard } from './common/guards/roles.guard';
 import { UsersModule } from './modules/users/users.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { OrganizersModule } from './modules/organizers/organizers.module';
-import { CruisesModule } from './modules/cruises/cruises.module';
-import { EventsModule } from './modules/events/events.module';
+import { CatalogModule } from './modules/catalog/catalog.module';
 import { BookingsModule } from './modules/bookings/bookings.module';
 import { TicketsModule } from './modules/tickets/tickets.module';
 import { AdminModule } from './modules/admin/admin.module';
@@ -42,9 +41,8 @@ import { AdminModule } from './modules/admin/admin.module';
     HealthModule,
     UsersModule,
     AuthModule,
+    CatalogModule,
     OrganizersModule,
-    CruisesModule,
-    EventsModule,
     BookingsModule,
     TicketsModule,
     AdminModule,

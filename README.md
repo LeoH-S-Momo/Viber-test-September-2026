@@ -118,11 +118,31 @@ pnpm test:e2e             # testes end-to-end do web (Playwright) — requer
   gera o Prisma Client automaticamente (`postinstall`); rode `pnpm db:migrate` para aplicar as
   migrations antes do primeiro `pnpm dev`.
 
+## Módulo de catálogo
+
+APIs de descoberta e gestão de conteúdo — navios, decks, cabines, categorias de cabine, portos,
+artistas, venues, restaurantes — e o núcleo do catálogo, **cruzeiros**: criação, edição,
+publicação/despublicação (com regras de negócio — precisa de itinerário e preço definidos),
+listagem pública paginada com filtros (tema, destino, período, faixa de preço, organizador,
+status) e ordenação (inclusive por preço mínimo). Escrita sempre restrita a `ORGANIZER_ADMIN`
+(escopado ao próprio organizador — nunca vê/edita recurso de outro) ou `PLATFORM_ADMIN` para dado
+de referência global (portos). Leitura de cruzeiros publicados é sempre pública. Ver a matriz
+completa em [`docs/architecture/api-permissions.md`](docs/architecture/api-permissions.md) e o
+racional de arquitetura (camadas controller/application/domain/persistence) em
+[ADR-0006](docs/architecture/decisions/0006-catalog-layering.md).
+
+```bash
+# Catalogo publico, com filtros/paginacao/ordenacao
+curl "http://localhost:3333/cruises?theme=Rock&sortBy=price&sortOrder=asc&page=1&pageSize=10"
+curl "http://localhost:3333/cruises/rock-in-sea-classicos-do-rock"
+```
+
 ## Status
 
-Fase atual: bootstrap do monorepo, camada de persistência e autenticação/autorização concluídos —
-frontend e backend sobem localmente, banco modelado (28 tabelas) e migrado, seed de demonstração
-funcionando, auth completa (cadastro, login, refresh com rotação, logout, recuperação de senha)
-com RBAC por papel e por posse de recurso, health check e documentação de API no ar. Checkout e
-pagamento ainda não implementados. Ver `docs/DEVLOG.md` para o histórico e
+Fase atual: bootstrap do monorepo, camada de persistência, autenticação/autorização e módulo de
+catálogo concluídos — frontend e backend sobem localmente, banco modelado (28 tabelas) e migrado,
+seed de demonstração funcionando, auth completa (cadastro, login, refresh com rotação, logout,
+recuperação de senha) com RBAC por papel e por posse de recurso, catálogo completo (12 entidades,
+cruzeiros com publish/unpublish/filtros/paginação/ordenação), health check e documentação de API
+no ar. Checkout e pagamento ainda não implementados. Ver `docs/DEVLOG.md` para o histórico e
 `docs/product/BACKLOG.md` para o roadmap priorizado.

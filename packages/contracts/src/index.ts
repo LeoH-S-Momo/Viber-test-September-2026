@@ -2,8 +2,20 @@ export * from './health/health.schema';
 export * from './auth/auth.schema';
 export * from './organizer/organizer.schema';
 export * from './cruise/cruise.schema';
+export * from './cruise/cruise-pricing.schema';
 export * from './event/event.schema';
 export * from './ticket/ticket.schema';
+export * from './experience/experience.schema';
+export * from './catalog/pagination.schema';
+export * from './catalog/ship.schema';
+export * from './catalog/deck.schema';
+export * from './catalog/cabin-category.schema';
+export * from './catalog/cabin.schema';
+export * from './catalog/port.schema';
+export * from './catalog/artist.schema';
+export * from './catalog/venue.schema';
+export * from './catalog/restaurant.schema';
+export * from './catalog/itinerary-stop.schema';
 
 // Os demais schemas de dominio (booking) serao adicionados aqui conforme as
 // features correspondentes forem implementadas.

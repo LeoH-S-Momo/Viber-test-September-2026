@@ -1,12 +1,18 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { RoleKey } from '@prisma/client';
-import { InviteStaffSchema, type InviteStaffInput } from '@seapass/contracts';
+import {
+  CruiseQuerySchema,
+  InviteStaffSchema,
+  type CruiseQuery,
+  type InviteStaffInput,
+} from '@seapass/contracts';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import { requireOrganizerId } from '../../common/utils/auth-context';
 import type { AuthenticatedUser } from '../auth/types/jwt-payload';
+import { CruisesService } from '../catalog/application/cruises.service';
 import { OrganizersService } from './organizers.service';
 
 /**
@@ -18,7 +24,10 @@ import { OrganizersService } from './organizers.service';
 @ApiBearerAuth()
 @Controller('organizers/me')
 export class OrganizersController {
-  constructor(private readonly organizersService: OrganizersService) {}
+  constructor(
+    private readonly organizersService: OrganizersService,
+    private readonly cruisesService: CruisesService,
+  ) {}
 
   @Roles(RoleKey.ORGANIZER_ADMIN)
   @Post('staff')
@@ -34,6 +43,17 @@ export class OrganizersController {
       fullName: staff.fullName,
       roles: staff.roles.map((r) => ({ key: r.role.key, organizerId: r.organizerId })),
     };
+  }
+
+  /** Gestao do proprio catalogo — ve cruzeiros em QUALQUER status (DRAFT incluso), diferente de GET /cruises publico. */
+  @Roles(RoleKey.ORGANIZER_ADMIN)
+  @Get('cruises')
+  myCruises(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query(new ZodValidationPipe(CruiseQuerySchema)) query: CruiseQuery,
+  ) {
+    const organizerId = requireOrganizerId(user, RoleKey.ORGANIZER_ADMIN);
+    return this.cruisesService.listForOrganizer(organizerId, query);
   }
 
   @Roles(RoleKey.ORGANIZER_ADMIN)
