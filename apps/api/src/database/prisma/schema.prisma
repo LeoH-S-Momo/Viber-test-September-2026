@@ -686,8 +686,13 @@ model Payment {
   status                 PaymentStatus @default(PENDING)
   amount                 Decimal       @db.Decimal(10, 2)
   currency               String        @default("BRL")
-  /// Referencia da transacao simulada (equivalente ao ID do gateway real).
+  /// Referencia da transacao no gateway (equivalente ao ID retornado por um gateway real, ex.:
+  /// PaymentIntent do Stripe). Comeca como um placeholder ("PENDING-...") no momento da criacao —
+  /// o valor definitivo so existe depois da resposta do PaymentGateway (ver ADR-0012).
   simulatedTransactionId String        @unique
+  /// Motivo da recusa devolvido pelo gateway (equivalente ao decline_code/failure_message de um
+  /// gateway real) — null enquanto PENDING/APPROVED, preenchido quando DECLINED.
+  failureReason           String?
   paidAt                 DateTime?
   createdAt              DateTime      @default(now())
   updatedAt              DateTime      @updatedAt

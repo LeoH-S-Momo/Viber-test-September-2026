@@ -1,5 +1,6 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
-import { BookingStatus, CabinStatus, CouponDiscountType, CruiseStatus, Prisma } from '@prisma/client';
+import { BookingStatus, CabinStatus, CouponDiscountType, CruiseStatus, PaymentStatus, Prisma } from '@prisma/client';
+import { PaymentGatewayTimeoutError } from '../../src/modules/payments/domain/payment-gateway';
 
 // @nestjs/bullmq ships ESM-only JS in node_modules, que ts-jest (transform
 // so .ts, node_modules intransformado) nao consegue parsear. Esta suite so
@@ -18,6 +19,7 @@ import { BookingsService } from '../../src/modules/bookings/application/bookings
 const PUBLISHED_CRUISE = { id: 'cruise-1', status: CruiseStatus.PUBLISHED };
 const ACTIVE_CABIN = { id: 'cabin-1', status: CabinStatus.ACTIVE, cabinCategoryId: 'cat-1' };
 const PRICING = { price: new Prisma.Decimal(2000), currency: 'BRL' };
+const CABIN_WITH_CATEGORY = { id: 'cabin-1', cabinCategoryId: 'cat-1', cabinCategory: { maxOccupancy: 2 } };
 
 function buildService() {
   const bookingsRepository = {
@@ -31,6 +33,7 @@ function buildService() {
     findCruiseBySlug: jest.fn(),
     findExperiencesByIds: jest.fn().mockResolvedValue([]),
     findCouponByCode: jest.fn(),
+    findCouponById: jest.fn(),
     countUserCouponUsage: jest.fn().mockResolvedValue(0),
     lockCabinForUpdate: jest.fn(),
     lockBookingForUpdate: jest.fn(),
@@ -39,12 +42,13 @@ function buildService() {
     expireStaleHold: jest.fn(),
     findActiveBooking: jest.fn(),
     findCruiseCabinPricing: jest.fn(),
+    findBookingExperiencePrices: jest.fn().mockResolvedValue([]),
     createHold: jest.fn(),
     updateStatus: jest.fn(),
     replaceGuestsAndExperiences: jest.fn(),
     createPayment: jest.fn(),
-    findPendingPayment: jest.fn(),
-    approvePayment: jest.fn(),
+    findLatestPayment: jest.fn(),
+    updatePaymentOutcome: jest.fn(),
   };
 
   const tx = {
@@ -53,16 +57,20 @@ function buildService() {
   };
   const prisma = { $transaction: jest.fn((callback: (tx: unknown) => unknown) => callback(tx)) };
   const configService = { getOrThrow: jest.fn().mockReturnValue(15) };
-  const queue = { add: jest.fn(), remove: jest.fn() };
+  const paymentGateway = { charge: jest.fn(), retrieve: jest.fn() };
+  const holdExpirationQueue = { add: jest.fn(), remove: jest.fn() };
+  const ticketIssuanceQueue = { add: jest.fn(), remove: jest.fn() };
 
   const service = new BookingsService(
     prisma as never,
     bookingsRepository as never,
     configService as never,
-    queue as never,
+    paymentGateway as never,
+    holdExpirationQueue as never,
+    ticketIssuanceQueue as never,
   );
 
-  return { service, bookingsRepository, prisma, tx, configService, queue };
+  return { service, bookingsRepository, prisma, tx, configService, paymentGateway, holdExpirationQueue, ticketIssuanceQueue };
 }
 
 describe('BookingsService', () => {
@@ -80,7 +88,7 @@ describe('BookingsService', () => {
     });
 
     it('creates a fresh hold with a full pricing breakdown when nothing blocks it', async () => {
-      const { service, bookingsRepository, queue } = buildService();
+      const { service, bookingsRepository, holdExpirationQueue } = buildService();
       bookingsRepository.findByIdempotencyKey.mockResolvedValue(null);
       bookingsRepository.findCruiseBySlug.mockResolvedValue(PUBLISHED_CRUISE);
       bookingsRepository.lockCabinForUpdate.mockResolvedValue(ACTIVE_CABIN);
@@ -104,7 +112,7 @@ describe('BookingsService', () => {
           totalAmount: expect.any(Prisma.Decimal),
         }),
       );
-      expect(queue.add).toHaveBeenCalledWith(expect.any(String), { bookingId: 'booking-1' }, expect.objectContaining({ jobId: 'booking-1' }));
+      expect(holdExpirationQueue.add).toHaveBeenCalledWith(expect.any(String), { bookingId: 'booking-1' }, expect.objectContaining({ jobId: 'booking-1' }));
     });
 
     it('returns the concurrently-created booking instead of throwing when it is the caller\'s own idempotent retry', async () => {
@@ -147,11 +155,7 @@ describe('BookingsService', () => {
     it('validates guest capacity, resolves experiences/coupon, and replaces details with the recomputed price', async () => {
       const { service, bookingsRepository } = buildService();
       bookingsRepository.lockBookingForUpdate.mockResolvedValue(HELD_BOOKING);
-      bookingsRepository.findCabinWithCategory.mockResolvedValue({
-        id: 'cabin-1',
-        cabinCategoryId: 'cat-1',
-        cabinCategory: { maxOccupancy: 2 },
-      });
+      bookingsRepository.findCabinWithCategory.mockResolvedValue(CABIN_WITH_CATEGORY);
       bookingsRepository.findExperiencesByIds.mockResolvedValue([
         { id: 'exp-1', price: new Prisma.Decimal(150), isIncluded: false },
       ]);
@@ -175,11 +179,7 @@ describe('BookingsService', () => {
     it('rejects when a requested experience does not belong to this cruise', async () => {
       const { service, bookingsRepository } = buildService();
       bookingsRepository.lockBookingForUpdate.mockResolvedValue(HELD_BOOKING);
-      bookingsRepository.findCabinWithCategory.mockResolvedValue({
-        id: 'cabin-1',
-        cabinCategoryId: 'cat-1',
-        cabinCategory: { maxOccupancy: 2 },
-      });
+      bookingsRepository.findCabinWithCategory.mockResolvedValue(CABIN_WITH_CATEGORY);
       bookingsRepository.findExperiencesByIds.mockResolvedValue([]); // nao achou nenhuma das pedidas
 
       const guests = [{ fullName: 'Ana', documentType: 'PASSPORT' as const, documentNumber: '123', isPrimary: true }];
@@ -192,11 +192,7 @@ describe('BookingsService', () => {
     it('rejects an invalid coupon before touching guests/experiences', async () => {
       const { service, bookingsRepository } = buildService();
       bookingsRepository.lockBookingForUpdate.mockResolvedValue(HELD_BOOKING);
-      bookingsRepository.findCabinWithCategory.mockResolvedValue({
-        id: 'cabin-1',
-        cabinCategoryId: 'cat-1',
-        cabinCategory: { maxOccupancy: 2 },
-      });
+      bookingsRepository.findCabinWithCategory.mockResolvedValue(CABIN_WITH_CATEGORY);
       bookingsRepository.findCruiseCabinPricing.mockResolvedValue(PRICING);
       bookingsRepository.findCouponByCode.mockResolvedValue({
         id: 'coupon-1',
@@ -222,23 +218,75 @@ describe('BookingsService', () => {
   });
 
   describe('checkout', () => {
-    const HELD_BOOKING = { id: 'booking-1', userId: 'user-1', cruiseId: 'cruise-1', cabinId: 'cabin-1', status: BookingStatus.HELD, holdExpiresAt: new Date(Date.now() + 60_000) };
+    const HELD_BOOKING = {
+      id: 'booking-1',
+      userId: 'user-1',
+      cruiseId: 'cruise-1',
+      cabinId: 'cabin-1',
+      couponId: null,
+      status: BookingStatus.HELD,
+      holdExpiresAt: new Date(Date.now() + 60_000),
+    };
 
-    it('moves HELD -> PAYMENT_PENDING and creates a simulated payment when guests are present', async () => {
-      const { service, bookingsRepository, tx } = buildService();
-      bookingsRepository.lockBookingForUpdate.mockResolvedValue(HELD_BOOKING);
+    const PAYMENT_PENDING_BOOKING = { ...HELD_BOOKING, status: BookingStatus.PAYMENT_PENDING };
+
+    function mockPricingLookups(bookingsRepository: ReturnType<typeof buildService>['bookingsRepository']) {
+      bookingsRepository.findCabinWithCategory.mockResolvedValue(CABIN_WITH_CATEGORY);
+      bookingsRepository.findCruiseCabinPricing.mockResolvedValue(PRICING);
+      bookingsRepository.findBookingExperiencePrices.mockResolvedValue([]);
+    }
+
+    /**
+     * `checkout` abre DUAS transacoes (ver ADR-0012) — a primeira le a reserva
+     * ainda HELD e a move pra PAYMENT_PENDING; a segunda (depois da chamada
+     * ao gateway) re-trava a MESMA reserva e precisa ve-la JA como
+     * PAYMENT_PENDING (senao cai no branch defensivo "reserva nao esta mais
+     * PAYMENT_PENDING"). `mockResolvedValueOnce` simula esse antes/depois.
+     */
+    function mockLockSequenceFromHeld(bookingsRepository: ReturnType<typeof buildService>['bookingsRepository']) {
+      bookingsRepository.lockBookingForUpdate.mockResolvedValueOnce(HELD_BOOKING).mockResolvedValue(PAYMENT_PENDING_BOOKING);
+    }
+
+    it('moves HELD -> PAYMENT_PENDING, recalculates the price server-side (never trusting what was already stored), and charges via the gateway', async () => {
+      const { service, bookingsRepository, tx, paymentGateway } = buildService();
+      mockLockSequenceFromHeld(bookingsRepository);
+      mockPricingLookups(bookingsRepository);
       tx.bookingGuest.count.mockResolvedValue(1);
-      tx.booking.findUniqueOrThrow.mockResolvedValue({ id: 'booking-1', totalAmount: new Prisma.Decimal(2100), currency: 'BRL' });
+      bookingsRepository.createPayment.mockResolvedValue({ id: 'payment-1', amount: new Prisma.Decimal(2150), currency: 'BRL' });
+      paymentGateway.charge.mockResolvedValue({ outcome: 'APPROVED', gatewayTransactionId: 'FAKE-1' });
+      bookingsRepository.updateStatus.mockResolvedValue({ id: 'booking-1', status: BookingStatus.CONFIRMED });
 
-      await service.checkout('booking-1', 'user-1', 'CREDIT_CARD');
+      const result = await service.checkout('booking-1', 'user-1', 'CREDIT_CARD');
 
-      expect(bookingsRepository.updateStatus).toHaveBeenCalledWith(expect.anything(), 'booking-1', {
-        status: BookingStatus.PAYMENT_PENDING,
-      });
+      // "Recalcular o preco no servidor": a conta e refeita a partir do preco da cabine, nao lida de uma coluna ja salva.
+      expect(bookingsRepository.findCruiseCabinPricing).toHaveBeenCalled();
       expect(bookingsRepository.createPayment).toHaveBeenCalledWith(
         expect.anything(),
-        expect.objectContaining({ bookingId: 'booking-1', method: 'CREDIT_CARD' }),
+        expect.objectContaining({ bookingId: 'booking-1', method: 'CREDIT_CARD', amount: expect.any(Prisma.Decimal) }),
       );
+      expect(paymentGateway.charge).toHaveBeenCalledWith(
+        expect.objectContaining({ method: 'CREDIT_CARD', idempotencyKey: 'payment-1' }),
+      );
+      expect(bookingsRepository.updatePaymentOutcome).toHaveBeenCalledWith(
+        expect.anything(),
+        'payment-1',
+        expect.objectContaining({ status: PaymentStatus.APPROVED }),
+      );
+      expect(result).toMatchObject({ status: BookingStatus.CONFIRMED });
+    });
+
+    it('passes a client-supplied Idempotency-Key through to the gateway instead of the default (payment id)', async () => {
+      const { service, bookingsRepository, tx, paymentGateway } = buildService();
+      mockLockSequenceFromHeld(bookingsRepository);
+      mockPricingLookups(bookingsRepository);
+      tx.bookingGuest.count.mockResolvedValue(1);
+      bookingsRepository.createPayment.mockResolvedValue({ id: 'payment-1', amount: new Prisma.Decimal(2150), currency: 'BRL' });
+      paymentGateway.charge.mockResolvedValue({ outcome: 'APPROVED', gatewayTransactionId: 'FAKE-1' });
+      bookingsRepository.updateStatus.mockResolvedValue({ id: 'booking-1', status: BookingStatus.CONFIRMED });
+
+      await service.checkout('booking-1', 'user-1', 'CREDIT_CARD', 'client-key-xyz');
+
+      expect(paymentGateway.charge).toHaveBeenCalledWith(expect.objectContaining({ idempotencyKey: 'client-key-xyz' }));
     });
 
     it('rejects checkout when there are no guests yet', async () => {
@@ -250,62 +298,140 @@ describe('BookingsService', () => {
       expect(bookingsRepository.createPayment).not.toHaveBeenCalled();
     });
 
-    it('is idempotent: retrying checkout with the same method while PAYMENT_PENDING returns the current booking without a new payment', async () => {
-      const { service, bookingsRepository, tx } = buildService();
+    it('retrying with the same method while a payment is still PENDING REUSES the same payment/idempotencyKey and calls the gateway again (covers both a duplicate attempt and a retry after a timeout)', async () => {
+      const { service, bookingsRepository, paymentGateway } = buildService();
       bookingsRepository.lockBookingForUpdate.mockResolvedValue({ ...HELD_BOOKING, status: BookingStatus.PAYMENT_PENDING });
-      bookingsRepository.findPendingPayment.mockResolvedValue({ id: 'payment-1', method: 'CREDIT_CARD' });
+      bookingsRepository.findLatestPayment.mockResolvedValue({ id: 'payment-1', method: 'CREDIT_CARD', status: PaymentStatus.PENDING });
+      mockPricingLookups(bookingsRepository);
+      paymentGateway.charge.mockResolvedValue({ outcome: 'APPROVED', gatewayTransactionId: 'FAKE-1' });
+      bookingsRepository.updateStatus.mockResolvedValue({ id: 'booking-1', status: BookingStatus.CONFIRMED });
+
+      const result = await service.checkout('booking-1', 'user-1', 'CREDIT_CARD');
+
+      // Nao cria um Payment novo — a chave de idempotencia (payment-1) e a MESMA da tentativa
+      // original, entao o FakePaymentGateway (ou um gateway real) devolve o resultado ja
+      // decidido em vez de cobrar de novo. E exatamente essa reutilizacao que torna seguro
+      // tanto um clique duplicado quanto um retry deliberado apos um timeout.
+      expect(bookingsRepository.createPayment).not.toHaveBeenCalled();
+      expect(paymentGateway.charge).toHaveBeenCalledWith(expect.objectContaining({ idempotencyKey: 'payment-1' }));
+      expect(result).toMatchObject({ status: BookingStatus.CONFIRMED });
+    });
+
+    it('rejects retrying checkout with a different payment method while one is still PENDING', async () => {
+      const { service, bookingsRepository } = buildService();
+      bookingsRepository.lockBookingForUpdate.mockResolvedValue({ ...HELD_BOOKING, status: BookingStatus.PAYMENT_PENDING });
+      bookingsRepository.findLatestPayment.mockResolvedValue({ id: 'payment-1', method: 'PIX', status: PaymentStatus.PENDING });
+
+      await expect(service.checkout('booking-1', 'user-1', 'CREDIT_CARD')).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('rejects checkout when PAYMENT_PENDING but there is no PENDING payment to resume (defensive — a DECLINED/APPROVED payment always takes the booking out of PAYMENT_PENDING in the same transaction, so this should never happen in practice)', async () => {
+      const { service, bookingsRepository } = buildService();
+      bookingsRepository.lockBookingForUpdate.mockResolvedValue({ ...HELD_BOOKING, status: BookingStatus.PAYMENT_PENDING });
+      bookingsRepository.findLatestPayment.mockResolvedValue({ id: 'payment-old', method: 'CREDIT_CARD', status: PaymentStatus.DECLINED });
+
+      await expect(service.checkout('booking-1', 'user-1', 'CREDIT_CARD')).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('cancels (releases) the booking when the gateway declines the charge', async () => {
+      const { service, bookingsRepository, tx, paymentGateway } = buildService();
+      mockLockSequenceFromHeld(bookingsRepository);
+      mockPricingLookups(bookingsRepository);
+      tx.bookingGuest.count.mockResolvedValue(1);
+      bookingsRepository.createPayment.mockResolvedValue({ id: 'payment-1', amount: new Prisma.Decimal(2150), currency: 'BRL' });
+      paymentGateway.charge.mockResolvedValue({ outcome: 'DECLINED', gatewayTransactionId: 'FAKE-3', declineReason: 'saldo insuficiente' });
+      bookingsRepository.updateStatus.mockResolvedValue({ id: 'booking-1', status: BookingStatus.CANCELLED });
+
+      const result = await service.checkout('booking-1', 'user-1', 'CREDIT_CARD');
+
+      expect(bookingsRepository.updatePaymentOutcome).toHaveBeenCalledWith(
+        expect.anything(),
+        'payment-1',
+        expect.objectContaining({ status: PaymentStatus.DECLINED, failureReason: 'saldo insuficiente' }),
+      );
+      expect(bookingsRepository.updateStatus).toHaveBeenCalledWith(
+        expect.anything(),
+        'booking-1',
+        expect.objectContaining({ status: BookingStatus.CANCELLED }),
+      );
+      expect(result).toMatchObject({ status: BookingStatus.CANCELLED });
+    });
+
+    it('leaves the booking PAYMENT_PENDING — never confirms nor cancels — when the gateway call times out', async () => {
+      const { service, bookingsRepository, tx, paymentGateway } = buildService();
+      bookingsRepository.lockBookingForUpdate.mockResolvedValue(HELD_BOOKING);
+      mockPricingLookups(bookingsRepository);
+      tx.bookingGuest.count.mockResolvedValue(1);
+      bookingsRepository.createPayment.mockResolvedValue({ id: 'payment-1', amount: new Prisma.Decimal(2150), currency: 'BRL' });
+      paymentGateway.charge.mockRejectedValue(new PaymentGatewayTimeoutError());
       tx.booking.findUniqueOrThrow.mockResolvedValue({ id: 'booking-1', status: BookingStatus.PAYMENT_PENDING });
 
       const result = await service.checkout('booking-1', 'user-1', 'CREDIT_CARD');
 
-      expect(result).toMatchObject({ id: 'booking-1' });
-      expect(bookingsRepository.createPayment).not.toHaveBeenCalled();
-      expect(bookingsRepository.updateStatus).not.toHaveBeenCalled();
+      expect(bookingsRepository.updatePaymentOutcome).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ status: BookingStatus.PAYMENT_PENDING });
     });
 
-    it('rejects retrying checkout with a different payment method than the one already pending', async () => {
-      const { service, bookingsRepository } = buildService();
-      bookingsRepository.lockBookingForUpdate.mockResolvedValue({ ...HELD_BOOKING, status: BookingStatus.PAYMENT_PENDING });
-      bookingsRepository.findPendingPayment.mockResolvedValue({ id: 'payment-1', method: 'PIX' });
+    it('propagates a genuine (non-timeout) gateway error instead of silently masking it as pending', async () => {
+      const { service, bookingsRepository, tx, paymentGateway } = buildService();
+      bookingsRepository.lockBookingForUpdate.mockResolvedValue(HELD_BOOKING);
+      mockPricingLookups(bookingsRepository);
+      tx.bookingGuest.count.mockResolvedValue(1);
+      bookingsRepository.createPayment.mockResolvedValue({ id: 'payment-1', amount: new Prisma.Decimal(2150), currency: 'BRL' });
+      paymentGateway.charge.mockRejectedValue(new Error('gateway explodiu'));
 
-      await expect(service.checkout('booking-1', 'user-1', 'CREDIT_CARD')).rejects.toBeInstanceOf(ConflictException);
+      await expect(service.checkout('booking-1', 'user-1', 'CREDIT_CARD')).rejects.toThrow('gateway explodiu');
     });
   });
 
   describe('confirmPayment', () => {
-    it('approves the pending payment and confirms the booking', async () => {
-      const { service, bookingsRepository, tx } = buildService();
-      const locked = { id: 'booking-1', userId: 'user-1', status: BookingStatus.PAYMENT_PENDING, holdExpiresAt: null };
-      bookingsRepository.lockBookingForUpdate.mockResolvedValue(locked);
-      tx.booking.findUniqueOrThrow.mockResolvedValue({ id: 'booking-1', status: BookingStatus.PAYMENT_PENDING, couponId: null });
-      bookingsRepository.findPendingPayment.mockResolvedValue({ id: 'payment-1' });
+    const PAYMENT_PENDING_SNAPSHOT = {
+      id: 'booking-1',
+      userId: 'user-1',
+      status: BookingStatus.PAYMENT_PENDING,
+      holdExpiresAt: null,
+      couponId: null as string | null,
+    };
+    const PENDING_PAYMENT = { id: 'payment-1', status: PaymentStatus.PENDING, simulatedTransactionId: 'PENDING-abc' };
+
+    it('verifies the outcome WITH THE GATEWAY (never trusts the callback blindly) before confirming', async () => {
+      const { service, bookingsRepository, paymentGateway } = buildService();
+      bookingsRepository.findByIdForUser.mockResolvedValue(PAYMENT_PENDING_SNAPSHOT);
+      bookingsRepository.findLatestPayment.mockResolvedValue(PENDING_PAYMENT);
+      bookingsRepository.lockBookingForUpdate.mockResolvedValue({ ...PAYMENT_PENDING_SNAPSHOT });
+      paymentGateway.retrieve.mockResolvedValue({ outcome: 'APPROVED', gatewayTransactionId: 'FAKE-1' });
       bookingsRepository.updateStatus.mockResolvedValue({ id: 'booking-1', status: BookingStatus.CONFIRMED });
 
       const result = await service.confirmPayment('booking-1', 'user-1');
 
-      expect(bookingsRepository.approvePayment).toHaveBeenCalledWith(expect.anything(), 'payment-1', expect.any(Date));
+      expect(paymentGateway.retrieve).toHaveBeenCalledWith('PENDING-abc');
+      expect(bookingsRepository.updatePaymentOutcome).toHaveBeenCalledWith(
+        expect.anything(),
+        'payment-1',
+        expect.objectContaining({ status: PaymentStatus.APPROVED }),
+      );
       expect(result).toMatchObject({ status: BookingStatus.CONFIRMED });
     });
 
-    it('is idempotent: does nothing (no double payment approval) when already CONFIRMED', async () => {
-      const { service, bookingsRepository, tx } = buildService();
-      const locked = { id: 'booking-1', userId: 'user-1', status: BookingStatus.CONFIRMED, holdExpiresAt: null };
-      bookingsRepository.lockBookingForUpdate.mockResolvedValue(locked);
-      tx.booking.findUniqueOrThrow.mockResolvedValue({ id: 'booking-1', status: BookingStatus.CONFIRMED, couponId: null });
+    it('is idempotent: does nothing (no gateway call) when already CONFIRMED', async () => {
+      const { service, bookingsRepository, paymentGateway } = buildService();
+      bookingsRepository.findByIdForUser.mockResolvedValue({ id: 'booking-1', status: BookingStatus.CONFIRMED });
 
       const result = await service.confirmPayment('booking-1', 'user-1');
 
       expect(result).toMatchObject({ status: BookingStatus.CONFIRMED });
-      expect(bookingsRepository.approvePayment).not.toHaveBeenCalled();
+      expect(bookingsRepository.findLatestPayment).not.toHaveBeenCalled();
+      expect(paymentGateway.retrieve).not.toHaveBeenCalled();
       expect(bookingsRepository.updateStatus).not.toHaveBeenCalled();
     });
 
-    it('increments coupon usage when the booking has one applied', async () => {
-      const { service, bookingsRepository, tx } = buildService();
-      const locked = { id: 'booking-1', userId: 'user-1', status: BookingStatus.PAYMENT_PENDING, holdExpiresAt: null };
-      bookingsRepository.lockBookingForUpdate.mockResolvedValue(locked);
-      tx.booking.findUniqueOrThrow.mockResolvedValue({ id: 'booking-1', status: BookingStatus.PAYMENT_PENDING, couponId: 'coupon-1' });
-      bookingsRepository.findPendingPayment.mockResolvedValue({ id: 'payment-1' });
+    it('increments coupon usage when the booking has one applied and the gateway confirms approval', async () => {
+      const { service, bookingsRepository, paymentGateway } = buildService();
+      const snapshot = { ...PAYMENT_PENDING_SNAPSHOT, couponId: 'coupon-1' };
+      bookingsRepository.findByIdForUser.mockResolvedValue(snapshot);
+      bookingsRepository.findLatestPayment.mockResolvedValue(PENDING_PAYMENT);
+      bookingsRepository.lockBookingForUpdate.mockResolvedValue(snapshot);
+      paymentGateway.retrieve.mockResolvedValue({ outcome: 'APPROVED', gatewayTransactionId: 'FAKE-1' });
       bookingsRepository.lockCouponForUpdate.mockResolvedValue({ id: 'coupon-1' });
       bookingsRepository.updateStatus.mockResolvedValue({ id: 'booking-1', status: BookingStatus.CONFIRMED });
 
@@ -314,14 +440,39 @@ describe('BookingsService', () => {
       expect(bookingsRepository.incrementCouponUsage).toHaveBeenCalledWith(expect.anything(), 'coupon-1');
     });
 
-    it('rejects confirming when there is no pending payment on file', async () => {
-      const { service, bookingsRepository, tx } = buildService();
-      const locked = { id: 'booking-1', userId: 'user-1', status: BookingStatus.PAYMENT_PENDING, holdExpiresAt: null };
-      bookingsRepository.lockBookingForUpdate.mockResolvedValue(locked);
-      tx.booking.findUniqueOrThrow.mockResolvedValue({ id: 'booking-1', status: BookingStatus.PAYMENT_PENDING, couponId: null });
-      bookingsRepository.findPendingPayment.mockResolvedValue(null);
+    it('rejects confirming when there is no payment on file at all', async () => {
+      const { service, bookingsRepository } = buildService();
+      bookingsRepository.findByIdForUser.mockResolvedValue(PAYMENT_PENDING_SNAPSHOT);
+      bookingsRepository.findLatestPayment.mockResolvedValue(null);
 
       await expect(service.confirmPayment('booking-1', 'user-1')).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('gracefully returns the current state (no error) when a concurrent call already resolved the payment — a race, not a misuse (ver ADR-0012)', async () => {
+      const { service, bookingsRepository, paymentGateway } = buildService();
+      const resolvedSnapshot = { id: 'booking-1', status: BookingStatus.CONFIRMED };
+      bookingsRepository.findByIdForUser
+        .mockResolvedValueOnce(PAYMENT_PENDING_SNAPSHOT) // 1a leitura: ainda parecia PAYMENT_PENDING
+        .mockResolvedValueOnce(resolvedSnapshot); // 2a leitura (apos ver o pagamento ja resolvido): reflete o estado real
+      bookingsRepository.findLatestPayment.mockResolvedValue({ ...PENDING_PAYMENT, status: PaymentStatus.APPROVED });
+
+      const result = await service.confirmPayment('booking-1', 'user-1');
+
+      expect(paymentGateway.retrieve).not.toHaveBeenCalled();
+      expect(result).toBe(resolvedSnapshot);
+    });
+
+    it('cancels the booking when the gateway reveals the payment was actually declined', async () => {
+      const { service, bookingsRepository, paymentGateway } = buildService();
+      bookingsRepository.findByIdForUser.mockResolvedValue(PAYMENT_PENDING_SNAPSHOT);
+      bookingsRepository.findLatestPayment.mockResolvedValue(PENDING_PAYMENT);
+      bookingsRepository.lockBookingForUpdate.mockResolvedValue({ ...PAYMENT_PENDING_SNAPSHOT });
+      paymentGateway.retrieve.mockResolvedValue({ outcome: 'DECLINED', gatewayTransactionId: 'FAKE-1', declineReason: 'expirado' });
+      bookingsRepository.updateStatus.mockResolvedValue({ id: 'booking-1', status: BookingStatus.CANCELLED });
+
+      const result = await service.confirmPayment('booking-1', 'user-1');
+
+      expect(result).toMatchObject({ status: BookingStatus.CANCELLED });
     });
   });
 

@@ -600,4 +600,56 @@ dois lugares, sempre provar contra infraestrutura real) levou a promover o cálc
 próprio em vez de só inchar a policy de Booking, e a escrever um teste que prova a ausência do bug
 de ponto flutuante em vez de só confiar que `Prisma.Decimal` resolve isso sozinho.
 
+## 2026-09-03 — Checkout completo via PaymentGateway (abstração + FakePaymentGateway)
+
+**O quê:** implementado o checkout completo do SeaPass sobre uma abstração de gateway de
+pagamento (`PaymentGateway`, porta) e uma implementação simulada (`FakePaymentGateway`, adaptador)
+— novo módulo `modules/payments/`. Racional completo em
+[ADR-0012](architecture/decisions/0012-checkout-payment-gateway.md).
+
+**Fluxo, os 10 passos pedidos, todos mapeados:** receber a reserva → validar o hold → recalcular
+preço/cupom no servidor (nunca confia em `Booking.totalAmount` já salvo, sempre reconstrói das
+tabelas de origem) → criar `Payment` → chamar `paymentGateway.charge` (simula aprovação/recusa) →
+atualizar o pagamento → confirmar (aprovado) ou liberar/cancelar (recusado) a reserva → cabine
+confirmada automaticamente (derivada do status, sem escrita extra — ADR-0008) → ticket emitido
+depois, assíncrono via BullMQ.
+
+**Duas transações, não uma:** a criação do `Payment` e a aplicação do desfecho rodam em
+transações separadas, com a chamada ao gateway acontecendo **fora** de qualquer transação — nunca
+segurar o lock da reserva durante uma chamada de rede, o tipo de detalhe que só importa de verdade
+quando se pensa em trocar por um gateway real de latência não-trivial.
+
+**Estados tratados:** aprovado (`Payment` `APPROVED`, `Booking` `CONFIRMED`), recusado (`DECLINED` +
+`failureReason`, `Booking` `CANCELLED` com o motivo), pendente (`PENDING` — boleto, assíncrono de
+verdade), timeout (`PaymentGatewayTimeoutError`, distinto de um desfecho de negócio — nunca vira
+sucesso nem falha às cegas), duplicata e retry (resolvidos pelo mesmo mecanismo: reenviar com a
+mesma `Idempotency-Key` reutiliza a mesma tentativa, o gateway nunca cobra duas vezes).
+
+**Um bug de corrida real, encontrado testando concorrência de verdade:** `confirmPayment`
+originalmente decidia "há pagamento pendente?" a partir de uma consulta composta
+(`findByIdForUser`) que não é atomicamente consistente entre suas sub-consultas — 8 chamadas
+verdadeiramente concorrentes (`Promise.all`) a `confirm-payment` revelaram a janela: uma leitura
+podia ver a reserva ainda `PAYMENT_PENDING` mas o pagamento já `APPROVED` (resolvido por uma
+tentativa concorrente), gerando um 409 incorreto. Corrigido com uma consulta atômica de uma linha
+só (`findLatestPayment`) e tratando "já resolvido por outra tentativa" como corrida perdida (devolve
+o estado atual), não como erro de uso.
+
+**Testes:** `bookings.service.spec.ts` ampliado (gateway mockado — aprovação, recusa, timeout,
+retry, a corrida corrigida) e novo `checkout-payment-gateway.e2e-spec.ts` contra Postgres/Redis
+reais (aprovação síncrona com emissão de ticket, recusa liberando a cabine, timeout+retry sem
+cobrança dupla, 6 requisições concorrentes com a mesma chave de idempotência, preço recalculado
+após o organizador mudar o preço da cabine). `booking-domain.e2e-spec.ts` e
+`cabin-hold-concurrency.e2e-spec.ts` ajustados: PIX/cartão agora resolvem dentro do próprio
+checkout (o `FakePaymentGateway` aprova na hora), BOLETO é o caminho que genuinamente fica
+pendente, usado para exercitar `confirm-payment` de verdade.
+
+**Como trocar por Stripe/Mercado Pago:** documentado no ADR-0012 com um esboço completo de
+`StripePaymentGateway` — troca-se uma linha em `payments.module.ts`, nenhum código de `bookings`
+muda, porque tudo depende só do token `PAYMENT_GATEWAY`, nunca da classe concreta.
+
+**Por quê:** o pedido foi explícito em não acoplar a um provedor específico e em tratar cada estado
+de pagamento como um caso de verdade, não um detalhe — a mesma disciplina desta conversa (provar
+concorrência com `Promise.all` real, nunca simular) foi o que revelou o bug de corrida acima, que
+uma suíte só com chamadas sequenciais jamais teria pego.
+
 <!-- Novas entradas são adicionadas ao final, em ordem cronológica, cada uma com data, "O quê" e "Por quê". -->

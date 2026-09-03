@@ -219,7 +219,13 @@ describe('Cabin hold lifecycle (integration)', () => {
     });
   });
 
-  /** Hold + hospede + checkout — leva a reserva ate PAYMENT_PENDING (fluxo completo em booking-domain.e2e-spec.ts). */
+  /**
+   * Hold + hospede + checkout com PIX — o `FakePaymentGateway` (ver ADR-0012)
+   * aprova metodos sincronos (PIX/cartao) DENTRO do proprio checkout, sem
+   * precisar de um `confirm-payment` separado — devolve a reserva ja
+   * CONFIRMED. O fluxo completo do motor de preco/cupom/gateway vive em
+   * booking-domain.e2e-spec.ts e checkout-payment-gateway.e2e-spec.ts.
+   */
   async function holdAndCheckout(token: string): Promise<string> {
     const hold = await request(server())
       .post(`/cruises/${cruiseSlug}/cabins/${cabinBId}/hold`)
@@ -233,21 +239,40 @@ describe('Cabin hold lifecycle (integration)', () => {
       .send({ guests: [{ fullName: 'Titular Teste', documentType: 'PASSPORT', documentNumber: 'AB123456', isPrimary: true }] })
       .expect(200);
 
-    await request(server())
+    const checkout = await request(server())
       .post(`/bookings/${hold.body.id}/checkout`)
       .set('Authorization', `Bearer ${token}`)
       .send({ paymentMethod: 'PIX' })
       .expect(200);
+    expect(checkout.body.status).toBe('CONFIRMED');
 
     return hold.body.id as string;
   }
 
   describe('confirmacao de pagamento, cancelamento e posse', () => {
-    it('confirms payment for a PAYMENT_PENDING booking and the cabin then reports BOOKED', async () => {
-      const bookingId = await holdAndCheckout(passengerAToken);
+    it('resolves BOLETO as PENDING at checkout, then confirm-payment (simulando o webhook) confirma a reserva e a cabine reporta BOOKED', async () => {
+      const hold = await request(server())
+        .post(`/cruises/${cruiseSlug}/cabins/${cabinBId}/hold`)
+        .set('Authorization', `Bearer ${passengerAToken}`)
+        .send()
+        .expect(201);
+      await request(server())
+        .put(`/bookings/${hold.body.id}/details`)
+        .set('Authorization', `Bearer ${passengerAToken}`)
+        .send({ guests: [{ fullName: 'Titular Boleto', documentType: 'PASSPORT', documentNumber: 'BL123456', isPrimary: true }] })
+        .expect(200);
+
+      const checkout = await request(server())
+        .post(`/bookings/${hold.body.id}/checkout`)
+        .set('Authorization', `Bearer ${passengerAToken}`)
+        .send({ paymentMethod: 'BOLETO' })
+        .expect(200);
+      // Boleto e assincrono na vida real — o FakePaymentGateway simula isso devolvendo PENDING
+      // no proprio checkout (ver ADR-0012), nao aprovando na hora como PIX/cartao fariam.
+      expect(checkout.body.status).toBe('PAYMENT_PENDING');
 
       await request(server())
-        .post(`/bookings/${bookingId}/confirm-payment`)
+        .post(`/bookings/${hold.body.id}/confirm-payment`)
         .set('Authorization', `Bearer ${passengerAToken}`)
         .send()
         .expect(200);
@@ -258,7 +283,7 @@ describe('Cabin hold lifecycle (integration)', () => {
       expect(availability.body.availability).toBe('BOOKED');
 
       await request(server())
-        .post(`/bookings/${bookingId}/cancel`)
+        .post(`/bookings/${hold.body.id}/cancel`)
         .set('Authorization', `Bearer ${passengerAToken}`)
         .send({ reason: 'Limpeza pos-teste' })
         .expect(200);
@@ -296,12 +321,7 @@ describe('Cabin hold lifecycle (integration)', () => {
     });
 
     it('rejects releasing an already-CONFIRMED booking, pointing to cancel instead', async () => {
-      const bookingId = await holdAndCheckout(passengerAToken);
-      await request(server())
-        .post(`/bookings/${bookingId}/confirm-payment`)
-        .set('Authorization', `Bearer ${passengerAToken}`)
-        .send()
-        .expect(200);
+      const bookingId = await holdAndCheckout(passengerAToken); // ja CONFIRMED — PIX resolve no proprio checkout.
 
       const release = await request(server())
         .post(`/bookings/${bookingId}/release`)

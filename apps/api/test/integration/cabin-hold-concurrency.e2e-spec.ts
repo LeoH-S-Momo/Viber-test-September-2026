@@ -188,7 +188,11 @@ describe('Cabin hold concurrency (integration)', () => {
     const ownerIndex = registrationIndexForUser(owner.userId);
     const token = passengerTokens[ownerIndex];
 
-    // Precisa de hospede + checkout antes de o pagamento poder ser confirmado.
+    // Precisa de hospede + checkout antes de o pagamento poder ser confirmado. BOLETO (nao PIX/
+    // cartao) de proposito: o FakePaymentGateway devolve PENDING pra ele (ver ADR-0012), entao a
+    // reserva continua PAYMENT_PENDING depois do checkout — e so assim que as N chamadas
+    // concorrentes a confirm-payment abaixo disputam de verdade a mesma resolucao, em vez de
+    // encontrarem a reserva ja CONFIRMED (que PIX/cartao aprovariam na hora, sem corrida nenhuma).
     await request(server())
       .put(`/bookings/${booking!.id}/details`)
       .set('Authorization', `Bearer ${token}`)
@@ -196,11 +200,12 @@ describe('Cabin hold concurrency (integration)', () => {
         guests: [{ fullName: 'Titular Concorrencia', documentType: 'PASSPORT', documentNumber: 'CT123456', isPrimary: true }],
       })
       .expect(200);
-    await request(server())
+    const checkoutRes = await request(server())
       .post(`/bookings/${booking!.id}/checkout`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ paymentMethod: 'PIX' })
+      .send({ paymentMethod: 'BOLETO' })
       .expect(200);
+    expect(checkoutRes.body.status).toBe('PAYMENT_PENDING');
 
     const responses = await Promise.all(
       Array.from({ length: 8 }, () =>

@@ -308,16 +308,19 @@ describe('Booking domain (integration)', () => {
     expect(detailsRes.body.guests).toHaveLength(2);
     expect(detailsRes.body.experiences).toHaveLength(2);
 
+    // BOLETO e assincrono na vida real — o FakePaymentGateway simula isso devolvendo PENDING no
+    // proprio checkout (metodos sincronos como PIX/cartao ja aprovariam aqui — ver
+    // checkout-payment-gateway.e2e-spec.ts — e ADR-0012).
     const checkoutRes = await request(server())
       .post(`/bookings/${bookingId}/checkout`)
       .set('Authorization', `Bearer ${passengerAToken}`)
-      .send({ paymentMethod: 'PIX' })
+      .send({ paymentMethod: 'BOLETO' })
       .expect(200);
     expect(checkoutRes.body.status).toBe('PAYMENT_PENDING');
 
     const payment = await prisma.payment.findFirstOrThrow({ where: { bookingId } });
     expect(payment.status).toBe('PENDING');
-    expect(payment.method).toBe('PIX');
+    expect(payment.method).toBe('BOLETO');
     expect(Number(payment.amount)).toBeCloseTo(2131.75, 2);
 
     const confirmRes = await request(server())
@@ -451,16 +454,13 @@ describe('Booking domain (integration)', () => {
         couponCode: perUserLimitCouponCode,
       })
       .expect(200);
-    await request(server())
+    // PIX resolve (aprova) dentro do proprio checkout — ver ADR-0012 — sem precisar de confirm-payment.
+    const checkoutRes = await request(server())
       .post(`/bookings/${firstBookingId}/checkout`)
       .set('Authorization', `Bearer ${passengerAToken}`)
       .send({ paymentMethod: 'PIX' })
       .expect(200);
-    await request(server())
-      .post(`/bookings/${firstBookingId}/confirm-payment`)
-      .set('Authorization', `Bearer ${passengerAToken}`)
-      .send()
-      .expect(200);
+    expect(checkoutRes.body.status).toBe('CONFIRMED');
     // Libera a cabine (so uma cabine de teste neste arquivo) antes de tentar
     // uma segunda reserva — o limite por usuario sobrevive ao cancelamento.
     await request(server())

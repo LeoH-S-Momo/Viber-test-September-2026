@@ -74,7 +74,12 @@ export class BookingsController {
     return this.bookingsService.updateDetails(id, user.sub, body);
   }
 
-  /** "Checkout": abre o pagamento simulado. */
+  /**
+   * Checkout completo (ver ADR-0012): valida hold, recalcula preco/cupom no
+   * servidor, cria pagamento e chama o PaymentGateway. `Idempotency-Key`
+   * opcional (mesmo padrao do hold — ver ADR-0010): repassada ao gateway
+   * como chave de deduplicacao da cobranca.
+   */
   @ApiBearerAuth()
   @Roles(RoleKey.PASSENGER)
   @Post('bookings/:id/checkout')
@@ -83,8 +88,9 @@ export class BookingsController {
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
     @Body(new ZodValidationPipe(CheckoutBookingSchema)) body: CheckoutBookingInput,
+    @Headers('idempotency-key') idempotencyKey?: string,
   ) {
-    return this.bookingsService.checkout(id, user.sub, body.paymentMethod);
+    return this.bookingsService.checkout(id, user.sub, body.paymentMethod, idempotencyKey || undefined);
   }
 
   /** Callback (simulado) de gateway de pagamento — confirma a reserva. */

@@ -226,17 +226,39 @@ cupom inexistente, desativado, expirado, incompatível, valor mínimo não ating
 atingido, já utilizado pelo usuário — e válido, quando nenhuma falha. Racional completo em
 [ADR-0011](docs/architecture/decisions/0011-pricing-engine.md).
 
+## Checkout (PaymentGateway + FakePaymentGateway)
+
+Domínio de pagamento desacoplado de provedor (`apps/api/src/modules/payments/`): interface
+`PaymentGateway` (porta) + `FakePaymentGateway` (adaptador simulado, sem chamar rede nenhuma) —
+trocar por Stripe/Mercado Pago é escrever uma nova classe e mudar uma linha em
+`payments.module.ts`, sem tocar em `bookings` (esboço completo no ADR). `POST
+/bookings/:id/checkout` valida o hold, **recalcula preço e cupom no servidor** (nunca confia no que
+já estava salvo), cria o pagamento e chama o gateway — métodos síncronos (PIX/cartão) já confirmam
+a reserva dentro do próprio checkout; `BOLETO` fica `PENDING` (assíncrono de verdade) até `POST
+/bookings/:id/confirm-payment` (o "webhook" simulado). Estados tratados: aprovado, recusado (libera
+a reserva com o motivo), pendente, timeout (nunca assume sucesso nem falha às cegas) e retry/
+duplicata (idempotência real via `Idempotency-Key`, testada com requisições verdadeiramente
+concorrentes). Ingresso digital emitido depois, assíncrono via BullMQ. Racional completo em
+[ADR-0012](docs/architecture/decisions/0012-checkout-payment-gateway.md).
+
+```bash
+# PIX aprova na hora; BOLETO fica PENDING (ver /confirm-payment); Idempotency-Key opcional.
+curl -s -X POST localhost:3333/bookings/$BOOKING/checkout -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" -d '{"paymentMethod":"PIX"}'
+```
+
 ## Status
 
 Fase atual: bootstrap do monorepo, camada de persistência, autenticação/autorização, módulo de
 catálogo, frontend público, mapa interativo do navio, motor de disponibilidade de cabine, domínio
-de Booking e motor de preços concluídos — frontend e backend sobem localmente, banco modelado (30 tabelas) e
-migrado, seed de demonstração funcionando, auth completa (cadastro, login, refresh com rotação,
-logout, recuperação de senha) com RBAC por papel e por posse de recurso, catálogo completo (12
-entidades, cruzeiros com publish/unpublish/filtros/paginação/ordenação), frontend público (Home,
-exploração, detalhe, mapa do navio) integrado à API real, hold de cabine com garantia real contra
-concorrência (testada com tentativas simultâneas de verdade contra Postgres), reserva completa
-(hóspedes, adicionais, preço com desconto/taxa, checkout e confirmação de pagamento simulados,
-idempotência testada com corridas reais), health check e documentação de API no ar. Gateway de
-pagamento real, emissão de ingresso digital e notificações continuam fora de escopo. Ver
-`docs/DEVLOG.md` para o histórico e `docs/product/BACKLOG.md` para o roadmap priorizado.
+de Booking, motor de preços e checkout completo concluídos — frontend e backend sobem localmente,
+banco modelado (30 tabelas) e migrado, seed de demonstração funcionando, auth completa (cadastro,
+login, refresh com rotação, logout, recuperação de senha) com RBAC por papel e por posse de
+recurso, catálogo completo (12 entidades, cruzeiros com publish/unpublish/filtros/paginação/
+ordenação), frontend público (Home, exploração, detalhe, mapa do navio) integrado à API real, hold
+de cabine com garantia real contra concorrência, reserva completa (hóspedes, adicionais, preço com
+desconto/taxa), checkout via `PaymentGateway` simulado (aprovação/recusa/timeout/retry tratados,
+idempotência testada com corridas reais) e emissão assíncrona de ingresso digital, health check e
+documentação de API no ar. Gateway de pagamento real (Stripe/Mercado Pago de verdade) e
+notificações continuam fora de escopo. Ver `docs/DEVLOG.md` para o histórico e
+`docs/product/BACKLOG.md` para o roadmap priorizado.

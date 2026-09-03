@@ -14,6 +14,7 @@ interface LockedBooking {
   userId: string;
   cruiseId: string;
   cabinId: string;
+  couponId: string | null;
   status: BookingStatus;
   holdExpiresAt: Date | null;
 }
@@ -117,6 +118,28 @@ export class BookingsRepository {
   }
 
   /**
+   * Mesma traducao de `findCouponByCode`, por id — usada no checkout para
+   * revalidar o cupom JA aplicado na reserva (`Booking.couponId`) contra o
+   * estado ATUAL do cupom, nunca contra o que foi valido quando
+   * `updateDetails` rodou (ver ADR-0012, "nao confiar no preco salvo").
+   */
+  async findCouponById(couponId: string): Promise<CouponRecord | null> {
+    const coupon = await this.prisma.coupon.findUnique({
+      where: { id: couponId },
+      include: { applicableCruises: { select: { cruiseId: true } } },
+    });
+    if (!coupon) return null;
+    const { applicableCruises, organizerId: _organizerId, createdAt: _createdAt, updatedAt: _updatedAt, ...rest } = coupon;
+    return { ...rest, applicableCruiseIds: applicableCruises.map((c) => c.cruiseId) };
+  }
+
+  /** Precos JA CONGELADOS (`priceAtBooking`, ver ADR-0010) dos adicionais selecionados — nunca o preco atual da Experience. */
+  async findBookingExperiencePrices(tx: Prisma.TransactionClient, bookingId: string): Promise<Prisma.Decimal[]> {
+    const rows = await tx.bookingExperience.findMany({ where: { bookingId }, select: { priceAtBooking: true } });
+    return rows.map((row) => row.priceAtBooking);
+  }
+
+  /**
    * Quantas vezes ESTE usuario ja usou este cupom — conta reservas que JA
    * FORAM confirmadas em algum momento (`confirmedAt` setado, nunca
    * limpo — ver confirmPayment/cancelBooking), nao o status ATUAL. Uma
@@ -147,7 +170,7 @@ export class BookingsRepository {
   /** Mesmo principio, para as transicoes que operam numa reserva ja existente. */
   async lockBookingForUpdate(tx: Prisma.TransactionClient, bookingId: string): Promise<LockedBooking | null> {
     const rows = await tx.$queryRaw<LockedBooking[]>`
-      SELECT id, "userId", "cruiseId", "cabinId", status, "holdExpiresAt"
+      SELECT id, "userId", "cruiseId", "cabinId", "couponId", status, "holdExpiresAt"
       FROM bookings WHERE id = ${bookingId} FOR UPDATE
     `;
     return rows[0] ?? null;
@@ -280,14 +303,22 @@ export class BookingsRepository {
     return tx.payment.create({ data: { ...data, status: PaymentStatus.PENDING } });
   }
 
-  findPendingPayment(tx: Prisma.TransactionClient, bookingId: string) {
-    return tx.payment.findFirst({
-      where: { bookingId, status: PaymentStatus.PENDING },
-      orderBy: { createdAt: 'desc' },
-    });
+  /** A tentativa de pagamento mais recente, qualquer status — usada para decidir se um checkout repetido e retry ou duplicata (ver ADR-0012). */
+  findLatestPayment(tx: Prisma.TransactionClient, bookingId: string) {
+    return tx.payment.findFirst({ where: { bookingId }, orderBy: { createdAt: 'desc' } });
   }
 
-  approvePayment(tx: Prisma.TransactionClient, paymentId: string, paidAt: Date) {
-    return tx.payment.update({ where: { id: paymentId }, data: { status: PaymentStatus.APPROVED, paidAt } });
+  /**
+   * Aplica o desfecho do gateway (ver PaymentGateway.charge) numa tentativa
+   * de pagamento — substitui o antigo `approvePayment`, generico o
+   * suficiente para aprovar, recusar ou so atualizar a referencia da
+   * transacao de um pagamento que continua PENDING (boleto gerado, timeout).
+   */
+  updatePaymentOutcome(
+    tx: Prisma.TransactionClient,
+    paymentId: string,
+    data: { status: PaymentStatus; simulatedTransactionId?: string; paidAt?: Date; failureReason?: string },
+  ) {
+    return tx.payment.update({ where: { id: paymentId }, data });
   }
 }
