@@ -151,13 +151,28 @@ erro, etc.) em [ADR-0007](docs/architecture/decisions/0007-public-frontend.md).
 pnpm --filter @seapass/web dev   # http://localhost:3000
 ```
 
+## Mapa interativo do navio
+
+Na página de detalhe do cruzeiro: seleção de deck, zoom/pan, cabines e instalações (teatro,
+lounge, bar, piscina, área de lazer, restaurantes) clicáveis com tooltip, painel de detalhe,
+legenda e 4 estados reais de disponibilidade de cabine (`AVAILABLE`/`ON_HOLD`/`BOOKED`/
+`UNAVAILABLE`, calculados por `CabinAvailabilityPolicy` a partir das reservas do cruzeiro). Planta
+gerada por uma função pura no frontend a partir dos dados reais do deck (sem coordenadas
+inventadas no banco). Racional completo em
+[ADR-0008](docs/architecture/decisions/0008-ship-deck-map.md).
+
+```bash
+# Decks + cabines (preco/disponibilidade deste cruzeiro) + venues + restaurantes
+curl "http://localhost:3333/cruises/rock-in-sea-classicos-do-rock/deck-map"
+```
+
 ## Status
 
 Fase atual: bootstrap do monorepo, camada de persistência, autenticação/autorização, módulo de
-catálogo e frontend público concluídos — frontend e backend sobem localmente, banco modelado (28
-tabelas) e migrado, seed de demonstração funcionando, auth completa (cadastro, login, refresh com
-rotação, logout, recuperação de senha) com RBAC por papel e por posse de recurso, catálogo
-completo (12 entidades, cruzeiros com publish/unpublish/filtros/paginação/ordenação), frontend
-público (Home, exploração, detalhe) integrado à API real, health check e documentação de API no
-ar. Checkout e pagamento ainda não implementados. Ver `docs/DEVLOG.md` para o histórico e
-`docs/product/BACKLOG.md` para o roadmap priorizado.
+catálogo, frontend público e mapa interativo do navio concluídos — frontend e backend sobem
+localmente, banco modelado (28 tabelas) e migrado, seed de demonstração funcionando, auth completa
+(cadastro, login, refresh com rotação, logout, recuperação de senha) com RBAC por papel e por
+posse de recurso, catálogo completo (12 entidades, cruzeiros com publish/unpublish/filtros/
+paginação/ordenação), frontend público (Home, exploração, detalhe, mapa do navio) integrado à API
+real, health check e documentação de API no ar. Checkout e pagamento ainda não implementados. Ver
+`docs/DEVLOG.md` para o histórico e `docs/product/BACKLOG.md` para o roadmap priorizado.

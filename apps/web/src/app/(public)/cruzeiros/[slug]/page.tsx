@@ -10,7 +10,9 @@ import { CruiseItinerary } from '@/features/cruise-detail/cruise-itinerary';
 import { CruiseOverview } from '@/features/cruise-detail/cruise-overview';
 import { CruiseRestaurants } from '@/features/cruise-detail/cruise-restaurants';
 import { CruiseVenues } from '@/features/cruise-detail/cruise-venues';
+import { ShipMap } from '@/features/ship-map/ship-map';
 import { getCruiseBySlug } from '@/services/cruises.service';
+import { getCruiseDeckMap } from '@/services/ship-map.service';
 
 type Params = Promise<{ slug: string }>;
 
@@ -28,7 +30,10 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
 
 export default async function CruiseDetailPage({ params }: { params: Params }) {
   const { slug } = await params;
-  const result = await getCruiseBySlug(slug);
+  // Disparadas juntas — o mapa do navio e um endpoint proprio (GET
+  // /cruises/:slug/deck-map), buscado em paralelo pra nao virar um segundo
+  // round-trip serial depois do detalhe do cruzeiro.
+  const [result, deckMapResult] = await Promise.all([getCruiseBySlug(slug), getCruiseDeckMap(slug)]);
 
   if (!result.ok) {
     return (
@@ -50,6 +55,13 @@ export default async function CruiseDetailPage({ params }: { params: Params }) {
 
       <Container className="flex flex-col gap-16 py-12 sm:py-16">
         <CruiseOverview cruise={cruise} />
+
+        {deckMapResult.ok ? (
+          <ShipMap decks={deckMapResult.data ?? []} />
+        ) : (
+          <ErrorState title="Não foi possível carregar o mapa do navio" message={deckMapResult.message} />
+        )}
+
         <CruiseItinerary stops={cruise.itineraryStops} />
         <CruiseVenues venues={cruise.ship.venues} />
         <CruiseEvents events={cruise.events} />

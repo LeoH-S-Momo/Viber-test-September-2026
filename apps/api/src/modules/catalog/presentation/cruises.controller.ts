@@ -42,6 +42,13 @@ export class CruisesController {
     return this.cruisesService.findBySlugPublished(slug);
   }
 
+  /** Decks, cabines (com preco/disponibilidade deste cruzeiro), venues e restaurantes — mapa do navio. */
+  @Public()
+  @Get(':slug/deck-map')
+  deckMap(@Param('slug') slug: string) {
+    return this.cruisesService.getDeckMap(slug);
+  }
+
   @ApiBearerAuth()
   @Roles(RoleKey.ORGANIZER_ADMIN)
   @Post()

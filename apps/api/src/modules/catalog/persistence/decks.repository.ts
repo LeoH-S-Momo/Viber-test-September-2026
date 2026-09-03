@@ -10,6 +10,24 @@ export class DecksRepository {
     return this.prisma.deck.findMany({ where: { shipId }, orderBy: { number: 'asc' } });
   }
 
+  /**
+   * Planta completa de um navio: cada deck com suas cabines (+ categoria),
+   * venues e restaurantes — a query de base do mapa interativo do navio.
+   * Independente de cruzeiro: disponibilidade/preco (que sao por sailing) sao
+   * cruzados depois, em CruisesService.getDeckMap.
+   */
+  findByShipWithLayout(shipId: string) {
+    return this.prisma.deck.findMany({
+      where: { shipId },
+      orderBy: { number: 'asc' },
+      include: {
+        cabins: { orderBy: { code: 'asc' }, include: { cabinCategory: true } },
+        venues: { orderBy: { name: 'asc' } },
+        restaurants: { orderBy: { name: 'asc' } },
+      },
+    });
+  }
+
   findById(id: string) {
     return this.prisma.deck.findUnique({ where: { id } });
   }

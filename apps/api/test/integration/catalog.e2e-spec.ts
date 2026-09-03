@@ -22,6 +22,9 @@ describe('Catalog discovery (integration)', () => {
   let draftCruiseId: string;
   let portA: { id: string; name: string };
   let portB: { id: string; name: string };
+  let shipId: string;
+  let bookedCabinId: string;
+  let freeCabinId: string;
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
@@ -51,6 +54,7 @@ describe('Catalog discovery (integration)', () => {
       .set(auth)
       .send({ name: `Navio ${label}`, passengerCapacity: 500 })
       .expect(201);
+    shipId = ship.body.id;
 
     const category = await request(server())
       .post(`/ships/${ship.body.id}/cabin-categories`)
@@ -110,6 +114,39 @@ describe('Catalog discovery (integration)', () => {
       price: 8000,
       embarkationPortId: portB.id,
       embarkationDate: '2027-11-01T12:00:00Z',
+    });
+
+    const deck = await request(server())
+      .post(`/ships/${shipId}/decks`)
+      .set(auth)
+      .send({ number: 5, name: `Deck ${label}` })
+      .expect(201);
+
+    const bookedCabin = await request(server())
+      .post(`/decks/${deck.body.id}/cabins`)
+      .set(auth)
+      .send({ cabinCategoryId: category.body.id, code: '101' })
+      .expect(201);
+    bookedCabinId = bookedCabin.body.id;
+
+    const freeCabin = await request(server())
+      .post(`/decks/${deck.body.id}/cabins`)
+      .set(auth)
+      .send({ cabinCategoryId: category.body.id, code: '102' })
+      .expect(201);
+    freeCabinId = freeCabin.body.id;
+
+    // Sem endpoint publico de checkout ainda (ver bookings.controller.ts) —
+    // criamos a reserva direto via Prisma so pra este fixture de teste.
+    const passenger = await prisma.user.findFirstOrThrow({ where: { email: `admin.${label}@example.com` } });
+    await prisma.booking.create({
+      data: {
+        userId: passenger.id,
+        cruiseId: cheapCruiseId,
+        cabinId: bookedCabinId,
+        status: 'CONFIRMED',
+        totalAmount: 500,
+      },
     });
 
     const draft = await request(server())
@@ -188,6 +225,30 @@ describe('Catalog discovery (integration)', () => {
       .expect(200);
     const descIds = desc.body.data.map((c: { id: string }) => c.id);
     expect(descIds.indexOf(expensiveCruiseId)).toBeLessThan(descIds.indexOf(cheapCruiseId));
+  });
+
+  it('deck-map cross-references cabins with real pricing and a real booking for this cruise', async () => {
+    const cheap = await prisma.cruise.findUniqueOrThrow({ where: { id: cheapCruiseId } });
+
+    const res = await request(server()).get(`/cruises/${cheap.slug}/deck-map`).expect(200);
+    const cabins = res.body.flatMap((deck: { cabins: unknown[] }) => deck.cabins) as Array<{
+      id: string;
+      price: string | null;
+      availability: string;
+    }>;
+
+    const booked = cabins.find((c) => c.id === bookedCabinId);
+    const free = cabins.find((c) => c.id === freeCabinId);
+
+    expect(booked).toMatchObject({ availability: 'BOOKED' });
+    expect(free).toMatchObject({ availability: 'AVAILABLE' });
+    expect(Number(booked?.price)).toBe(500);
+    expect(Number(free?.price)).toBe(500);
+  });
+
+  it('deck-map 404s for a draft cruise, same rule as the public catalog', async () => {
+    const draft = await prisma.cruise.findUniqueOrThrow({ where: { id: draftCruiseId } });
+    await request(server()).get(`/cruises/${draft.slug}/deck-map`).expect(404);
   });
 
   it('paginates results', async () => {

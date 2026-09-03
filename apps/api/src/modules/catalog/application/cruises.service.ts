@@ -7,9 +7,12 @@ import type {
   UpdateCruiseInput,
 } from '@seapass/contracts';
 import { generateUniqueSlug } from '../../../common/utils/slug';
+import { CabinAvailabilityPolicy } from '../domain/cabin-availability.policy';
 import { CruiseStatusPolicy } from '../domain/cruise-status.policy';
 import { toPageResult } from '../domain/pagination';
+import { CabinsRepository } from '../persistence/cabins.repository';
 import { CruisesRepository } from '../persistence/cruises.repository';
+import { DecksRepository } from '../persistence/decks.repository';
 import { CabinCategoriesService } from './cabin-categories.service';
 import { ShipsService } from './ships.service';
 
@@ -17,6 +20,8 @@ import { ShipsService } from './ships.service';
 export class CruisesService {
   constructor(
     private readonly cruisesRepository: CruisesRepository,
+    private readonly decksRepository: DecksRepository,
+    private readonly cabinsRepository: CabinsRepository,
     private readonly shipsService: ShipsService,
     private readonly cabinCategoriesService: CabinCategoriesService,
   ) {}
@@ -103,5 +108,43 @@ export class CruisesService {
       throw new ConflictException('Esta categoria de cabine nao pertence ao navio deste cruzeiro.');
     }
     return this.cruisesRepository.setCabinPricing(cruiseId, input);
+  }
+
+  /**
+   * Dados para o mapa interativo do navio: cada deck com suas cabines (preco
+   * + disponibilidade calculados PARA ESTE cruzeiro), venues e restaurantes.
+   * Publico, mesmas regras de visibilidade de findBySlugPublished (404 se o
+   * cruzeiro nao existe ou nao esta PUBLISHED).
+   */
+  async getDeckMap(slug: string) {
+    const cruise = await this.findBySlugPublished(slug);
+
+    const [decks, activeBookings] = await Promise.all([
+      this.decksRepository.findByShipWithLayout(cruise.shipId),
+      this.cabinsRepository.findActiveBookingsForCruise(cruise.id),
+    ]);
+
+    const bookingByCabinId = new Map(activeBookings.map((booking) => [booking.cabinId, booking]));
+    const priceByCategoryId = new Map(cruise.cabinPricings.map((pricing) => [pricing.cabinCategoryId, pricing]));
+
+    return decks.map((deck) => ({
+      id: deck.id,
+      number: deck.number,
+      name: deck.name,
+      description: deck.description,
+      cabins: deck.cabins.map((cabin) => {
+        const pricing = priceByCategoryId.get(cabin.cabinCategoryId);
+        return {
+          id: cabin.id,
+          code: cabin.code,
+          cabinCategory: cabin.cabinCategory,
+          price: pricing?.price ?? null,
+          currency: pricing?.currency ?? null,
+          availability: CabinAvailabilityPolicy.resolve(cabin.status, bookingByCabinId.get(cabin.id)),
+        };
+      }),
+      venues: deck.venues,
+      restaurants: deck.restaurants,
+    }));
   }
 }

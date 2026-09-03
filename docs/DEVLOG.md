@@ -391,4 +391,59 @@ responsividade, acessibilidade e consistência visual — a mesma disciplina das
 (testar contra infraestrutura real, não assumir que algo funciona) encontrou um bug de
 acessibilidade real que contradizia o próprio pedido, corrigido antes de declarar a etapa pronta.
 
+## 2026-09-03 — Mapa interativo do navio
+
+**O quê:** implementado o mapa interativo do navio na página de detalhe do cruzeiro — seleção de
+deck, zoom/pan, cabines e instalações (teatro, lounge, bar, piscina, área de lazer, restaurantes)
+clicáveis, tooltip no hover, painel de detalhe no clique, legenda e 4 estados reais de
+disponibilidade de cabine (disponível/em reserva temporária/reservada/indisponível). Decisões
+completas em [ADR-0008](architecture/decisions/0008-ship-deck-map.md).
+
+**Pré-requisitos de backend:** `Venue` ganhou um campo `type` real (enum THEATER/LOUNGE/BAR/POOL/
+LEISURE/OTHER — migration `20260903125431_add_venue_type`), sem o qual o mapa não teria como
+distinguir bar de piscina de teatro. Novo endpoint público `GET /cruises/:slug/deck-map` compõe
+decks + cabines (com categoria, preço da categoria PARA ESTE cruzeiro, e disponibilidade) + venues
++ restaurantes numa única chamada. Disponibilidade é regra de negócio real, isolada em
+`CabinAvailabilityPolicy` (domain puro, testado): cruza `Cabin.status` com as reservas
+`PENDING`/`CONFIRMED` do cruzeiro, incluindo a regra (já documentada no schema, nunca antes
+implementada) de que um hold `PENDING` expirado volta a ficar disponível.
+
+**Decisão de arquitetura que vale destacar:** nenhuma coordenada de posição foi adicionada ao
+banco (nem em `Cabin`, nem em `Deck`, nem em `Venue`). O layout da planta é calculado no frontend
+por uma função pura (`computeDeckLayout`, casco fixo + cabines em duas faixas + instalações
+empacotadas em "prateleiras") a partir dos dados reais do deck — o pedido dispensou precisão
+arquitetônica ("não precisa representar um navio real"), e coordenadas inventadas no banco
+pareceriam dado real sem ser. Qualquer deck/cabine cadastrado no futuro ganha planta automática,
+sem trabalho de autoria manual.
+
+**Seleção de cabine preparada para checkout, não implementada:** `ShipMap` aceita um
+`onSelectCabin` opcional que, quando fornecido, habilita um botão "Selecionar cabine" no painel de
+detalhe. A página de cruzeiro (uso atual) não passa essa prop — o mapa é só consulta hoje. Checkout
+em si continua fora de escopo, como definido em etapas anteriores desta conversa.
+
+**Um bug real encontrado durante a verificação visual:** a legenda de disponibilidade reusava as
+mesmas classes Tailwind `fill-*`/`stroke-*` das cabines do mapa (SVG) num `<span>` HTML comum —
+`fill`/`stroke` não têm efeito fora de SVG, então os quadradinhos coloridos da legenda apareciam
+sem cor nenhuma. Corrigido separando classes de SVG (`className`) das de HTML
+(`swatchClassName`, `bg-*`/`border-*`) em `availability-meta.ts`. Também descoberto (e corrigido
+reiniciando o processo com `.next` limpo): o dev server do Next, de tantas horas e edições nesta
+conversa, tinha o pipeline de CSS do HMR corrompido (arquivos `.css` devolvendo 404) — fazia o
+casco/cabines aparecerem pretos independente do bug da legenda.
+
+**Testado em 4 camadas:** `cabin-availability.policy.spec.ts` (8 casos, domínio puro) e
+`deck-layout-engine.test.ts` (8 casos, geometria pura) unitários; um teste de integração novo em
+`catalog.e2e-spec.ts` que cria deck/cabine/reserva de verdade (via API + Prisma direto, já que não
+há endpoint de checkout) contra Postgres real e verifica o endpoint `/deck-map`; 2 testes E2E
+Playwright (`ship-map.spec.ts`) contra o dev server e API reais; e inspeção visual manual (screenshots
+Playwright) dos 4 estados de disponibilidade, zoom, tooltip, painel de detalhe e responsividade
+mobile — incluindo forçar os 4 estados de verdade no banco (seed agora cria 1 reserva confirmada,
+1 hold pendente válido, 1 cabine em manutenção) em vez de simular na UI.
+
+**Por quê:** o pedido chamou isto explicitamente de "um dos principais diferenciais visuais" e
+pediu separação clara entre dados/visualização/regra de negócio e um componente que não fosse
+"impossível de manter" — a mesma disciplina desta conversa (testar contra infraestrutura real,
+nunca simular o que a API real já pode fazer) levou a modelar disponibilidade como regra de
+negócio de verdade (não um campo decorativo) e a preparar — sem implementar — o ponto de extensão
+que o checkout vai precisar mais adiante.
+
 <!-- Novas entradas são adicionadas ao final, em ordem cronológica, cada uma com data, "O quê" e "Por quê". -->

@@ -317,20 +317,67 @@ async function seedCabinCategoriesAndCabins(shipId: string, decks: Record<number
 async function seedVenuesArtistsRestaurants(shipId: string, decks: Record<number, string>) {
   const teatro = await prisma.venue.upsert({
     where: { shipId_name: { shipId, name: 'Teatro Ondas' } },
-    update: {},
-    create: { shipId, deckId: decks[10], name: 'Teatro Ondas', capacity: 500 },
+    update: { type: 'THEATER' },
+    create: {
+      shipId,
+      deckId: decks[10],
+      name: 'Teatro Ondas',
+      description: 'Palco principal para os shows de abertura e encerramento da viagem.',
+      capacity: 500,
+      type: 'THEATER',
+    },
   });
 
   const lounge = await prisma.venue.upsert({
     where: { shipId_name: { shipId, name: 'Lounge Riff' } },
-    update: {},
-    create: { shipId, deckId: decks[8], name: 'Lounge Riff', capacity: 150 },
+    update: { type: 'LOUNGE' },
+    create: {
+      shipId,
+      deckId: decks[8],
+      name: 'Lounge Riff',
+      description: 'Bar lounge com música ao vivo intimista, aberto até tarde.',
+      capacity: 150,
+      type: 'LOUNGE',
+    },
   });
 
   const deckStage = await prisma.venue.upsert({
     where: { shipId_name: { shipId, name: 'Palco do Deck' } },
-    update: {},
-    create: { shipId, deckId: decks[10], name: 'Palco do Deck', capacity: 300 },
+    update: { type: 'LEISURE' },
+    create: {
+      shipId,
+      deckId: decks[10],
+      name: 'Palco do Deck',
+      description: 'Área externa a céu aberto para festas e shows ao pôr do sol.',
+      capacity: 300,
+      type: 'LEISURE',
+    },
+  });
+
+  const piscina = await prisma.venue.upsert({
+    where: { shipId_name: { shipId, name: 'Piscina Vista Mar' } },
+    update: { type: 'POOL' },
+    create: {
+      shipId,
+      deckId: decks[10],
+      name: 'Piscina Vista Mar',
+      description: 'Piscina principal com deck de espreguiçadeiras e vista 360° para o mar.',
+      capacity: 120,
+      type: 'POOL',
+    },
+  });
+
+  const barMare = await prisma.venue.upsert({
+    where: { shipId_name: { shipId, name: 'Bar Maré Alta' } },
+    update: { type: 'BAR' },
+    create: {
+      shipId,
+      deckId: decks[8],
+      name: 'Bar Maré Alta',
+      description: 'Bar de coquetéis à beira da piscina, com cardápio autoral.',
+      capacity: 60,
+      type: 'BAR',
+    },
   });
 
   const mareAlta = await prisma.artist.upsert({
@@ -413,7 +460,7 @@ async function seedVenuesArtistsRestaurants(shipId: string, decks: Record<number
     },
   });
 
-  return { teatro, lounge, deckStage, mareAlta, trioBossaRock };
+  return { teatro, lounge, deckStage, piscina, barMare, mareAlta, trioBossaRock };
 }
 
 async function seedCruise(
@@ -617,6 +664,87 @@ async function seedCruise(
   return cruise;
 }
 
+function requireValue<T>(value: T | undefined, label: string): T {
+  if (value === undefined) {
+    throw new Error(`${label} nao foi criado(a) antes de ser referenciado(a) no seed.`);
+  }
+  return value;
+}
+
+/**
+ * Estados de disponibilidade reais para o mapa interativo do navio (ver
+ * CabinAvailabilityPolicy) — sem isto, toda cabine apareceria como
+ * disponivel e os estados BOOKED/ON_HOLD/UNAVAILABLE nunca seriam
+ * demonstrados contra dados de verdade.
+ */
+async function seedCabinAvailabilityDemoData(
+  cruiseId: string,
+  decks: Record<number, string>,
+  categories: Record<string, string>,
+  users: Awaited<ReturnType<typeof seedUsers>>,
+) {
+  const deck6Id = requireValue(decks[6], 'Deck 6');
+  const deck8Id = requireValue(decks[8], 'Deck 8');
+  const deck10Id = requireValue(decks[10], 'Deck 10');
+  const externaCategoryId = requireValue(categories.externa, 'Categoria externa');
+  const varandaCategoryId = requireValue(categories.varanda, 'Categoria varanda');
+
+  const externaCabin = await prisma.cabin.findUniqueOrThrow({
+    where: { deckId_code: { deckId: deck6Id, code: '6202' } },
+  });
+  const varandaCabin = await prisma.cabin.findUniqueOrThrow({
+    where: { deckId_code: { deckId: deck8Id, code: '8302' } },
+  });
+  const suiteCabin = await prisma.cabin.findUniqueOrThrow({
+    where: { deckId_code: { deckId: deck10Id, code: '10402' } },
+  });
+
+  const externaPricing = await prisma.cruiseCabinPricing.findUniqueOrThrow({
+    where: { cruiseId_cabinCategoryId: { cruiseId, cabinCategoryId: externaCategoryId } },
+  });
+  const varandaPricing = await prisma.cruiseCabinPricing.findUniqueOrThrow({
+    where: { cruiseId_cabinCategoryId: { cruiseId, cabinCategoryId: varandaCategoryId } },
+  });
+
+  // Reserva confirmada — cabine 6202 aparece como "BOOKED" no mapa.
+  await prisma.booking.upsert({
+    where: { id: 'seed-booking-confirmed' },
+    update: {},
+    create: {
+      id: 'seed-booking-confirmed',
+      userId: users.passenger2.id,
+      cruiseId,
+      cabinId: externaCabin.id,
+      status: 'CONFIRMED',
+      totalAmount: externaPricing.price,
+      currency: externaPricing.currency,
+      confirmedAt: new Date(),
+    },
+  });
+
+  // Hold de checkout ainda valido — cabine 8302 aparece como "ON_HOLD". O
+  // hold e reajustado a cada reseed para nunca aparecer expirado em dev.
+  const holdExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
+  await prisma.booking.upsert({
+    where: { id: 'seed-booking-pending-hold' },
+    update: { holdExpiresAt },
+    create: {
+      id: 'seed-booking-pending-hold',
+      userId: users.passenger1.id,
+      cruiseId,
+      cabinId: varandaCabin.id,
+      status: 'PENDING',
+      totalAmount: varandaPricing.price,
+      currency: varandaPricing.currency,
+      holdExpiresAt,
+    },
+  });
+
+  // Cabine fora de operacao — 10402 aparece como "UNAVAILABLE" independente
+  // de reserva (nao depende do cruzeiro, e um estado da cabine fisica).
+  await prisma.cabin.update({ where: { id: suiteCabin.id }, data: { status: 'MAINTENANCE' } });
+}
+
 async function main(): Promise<void> {
   console.log('Seeding SeaPass — dados de demonstração...');
 
@@ -631,6 +759,7 @@ async function main(): Promise<void> {
   const categories = await seedCabinCategoriesAndCabins(ship.id, decks);
   const venues = await seedVenuesArtistsRestaurants(ship.id, decks);
   const cruise = await seedCruise(rockInSea.id, ship.id, ports, categories, venues);
+  await seedCabinAvailabilityDemoData(cruise.id, decks, categories, users);
 
   console.log('Seed concluído com sucesso.');
   console.log('');

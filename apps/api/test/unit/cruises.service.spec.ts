@@ -14,16 +14,20 @@ function buildService() {
     existsBySlug: jest.fn().mockResolvedValue(false),
     setCabinPricing: jest.fn(),
   };
+  const decksRepository = { findByShipWithLayout: jest.fn() };
+  const cabinsRepository = { findActiveBookingsForCruise: jest.fn() };
   const shipsService = { findOwnedByOrganizerOrThrow: jest.fn() };
   const cabinCategoriesService = { findById: jest.fn() };
 
   const service = new CruisesService(
     cruisesRepository as never,
+    decksRepository as never,
+    cabinsRepository as never,
     shipsService as never,
     cabinCategoriesService as never,
   );
 
-  return { service, cruisesRepository, shipsService, cabinCategoriesService };
+  return { service, cruisesRepository, decksRepository, cabinsRepository, shipsService, cabinCategoriesService };
 }
 
 describe('CruisesService', () => {
@@ -120,6 +124,55 @@ describe('CruisesService', () => {
 
       expect(shipsService.findOwnedByOrganizerOrThrow).toHaveBeenCalledWith('org-mine', 'ship1');
       expect(cruisesRepository.create).toHaveBeenCalled();
+    });
+  });
+
+  describe('getDeckMap', () => {
+    it('cross-references cabins with this cruise pricing and active bookings', async () => {
+      const { service, cruisesRepository, decksRepository, cabinsRepository } = buildService();
+      cruisesRepository.findBySlug.mockResolvedValue({
+        id: 'cruise1',
+        shipId: 'ship1',
+        status: CruiseStatus.PUBLISHED,
+        cabinPricings: [{ cabinCategoryId: 'cat-interna', price: '2200.00', currency: 'BRL' }],
+      });
+      decksRepository.findByShipWithLayout.mockResolvedValue([
+        {
+          id: 'deck1',
+          number: 4,
+          name: 'Deck 4',
+          description: null,
+          cabins: [
+            { id: 'cabin-booked', code: '4101', status: 'ACTIVE', cabinCategoryId: 'cat-interna', cabinCategory: {} },
+            { id: 'cabin-free', code: '4102', status: 'ACTIVE', cabinCategoryId: 'cat-interna', cabinCategory: {} },
+            { id: 'cabin-unpriced', code: '4103', status: 'ACTIVE', cabinCategoryId: 'cat-outra', cabinCategory: {} },
+          ],
+          venues: [],
+          restaurants: [],
+        },
+      ]);
+      cabinsRepository.findActiveBookingsForCruise.mockResolvedValue([
+        { cabinId: 'cabin-booked', status: 'CONFIRMED', holdExpiresAt: null },
+      ]);
+
+      const deckMap = await service.getDeckMap('rock-in-sea');
+
+      expect(decksRepository.findByShipWithLayout).toHaveBeenCalledWith('ship1');
+      expect(cabinsRepository.findActiveBookingsForCruise).toHaveBeenCalledWith('cruise1');
+
+      const cabins = deckMap[0]?.cabins ?? [];
+      expect(cabins.find((c) => c.id === 'cabin-booked')).toMatchObject({
+        availability: 'BOOKED',
+        price: '2200.00',
+      });
+      expect(cabins.find((c) => c.id === 'cabin-free')).toMatchObject({
+        availability: 'AVAILABLE',
+        price: '2200.00',
+      });
+      expect(cabins.find((c) => c.id === 'cabin-unpriced')).toMatchObject({
+        availability: 'AVAILABLE',
+        price: null,
+      });
     });
   });
 });

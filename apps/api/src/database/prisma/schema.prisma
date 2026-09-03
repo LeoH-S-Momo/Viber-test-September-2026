@@ -46,6 +46,19 @@ enum CruiseStatus {
   COMPLETED
 }
 
+/// Categoria visual/funcional do venue — usada pelo mapa interativo do navio
+/// para escolher icone/cor (ver apps/web/src/features/ship-map). Nao existe
+/// uma entidade "Bar"/"Piscina" separada: sao Venues como outro qualquer,
+/// so classificados por tipo.
+enum VenueType {
+  THEATER
+  LOUNGE
+  BAR
+  POOL
+  LEISURE
+  OTHER
+}
+
 enum EventCategory {
   SHOW
   WORKSHOP
@@ -435,14 +448,15 @@ model CruiseCabinPricing {
 
 /// Espaco fisico a bordo onde eventos acontecem (teatro, lounge, deck).
 model Venue {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   shipId      String
   deckId      String?
   name        String
   description String?
   capacity    Int?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  type        VenueType @default(OTHER)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   ship   Ship    @relation(fields: [shipId], references: [id], onDelete: Cascade)
   deck   Deck?   @relation(fields: [deckId], references: [id], onDelete: SetNull)
