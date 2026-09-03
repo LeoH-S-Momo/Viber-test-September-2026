@@ -344,4 +344,51 @@ teste automatizado, verificar cada suposição em vez de assumir) encontrou uma 
 Prisma e um pré-requisito de negócio que não estava no pedido original, ambos resolvidos antes de
 declarar a etapa pronta.
 
+## 2026-09-03 — Frontend público (Home, exploração, detalhe de cruzeiro)
+
+**O quê:** implementado o frontend público do SeaPass — Home, página de exploração
+(`/cruzeiros`, com busca livre, filtros de tema/destino/data/preço e ordenação, tudo refletido
+na URL) e página de detalhe (`/cruzeiros/[slug]`) com hero visual, informações principais,
+itinerário, atrações do navio, eventos, experiências, restaurantes e categorias de cabine.
+Estados de loading (`loading.tsx` por rota), erro (`<ErrorState>` inline), vazio
+(`<EmptyState>` na listagem e `not-found.tsx` no detalhe) e sucesso implementados e verificados
+visualmente contra a API real — inclusive derrubando a API de propósito para confirmar que o
+estado de erro renderiza corretamente em vez de quebrar a página. Decisões registradas no
+[ADR-0007](architecture/decisions/0007-public-frontend.md).
+
+**Pré-requisitos de backend feitos junto:** busca livre (`q`) em `CruiseQuerySchema`, correção de
+um bug real de colisão de filtros `OR` em `CruisesRepository.buildCruiseWhere` (destino e busca
+livre se sobrescreveriam se usados juntos — corrigido com um array `AND` acumulando cada filtro
+como entrada independente) e enriquecimento do include de detalhe do cruzeiro com
+`ship.venues`/`ship.restaurants` para a página de detalhe não precisar de round-trips extras.
+
+**Um bug de acessibilidade real, encontrado e corrigido antes de reportar a etapa como pronta:**
+o componente `Field` do painel de filtros renderizava `<label htmlFor={id}>` mas nunca aplicava
+esse `id` ao input/select filho de fato — os `children` eram passados adiante sem alteração,
+apesar de um comentário afirmando o contrário. Leitores de tela não conseguiam associar o rótulo
+ao campo, e clicar no rótulo não focava o input — contradizendo diretamente o pedido de
+"priorizar acessibilidade". Corrigido com `cloneElement`/`isValidElement` injetando o `id` real
+no filho; coberto por um teste de regressão (`tests/unit/cruise-filters.test.tsx`) que verifica
+`label[for] === input.id` para todos os campos do painel.
+
+**Testado de ponta a ponta:** typecheck, lint e build de produção limpos; 13 testes unitários
+(Vitest — utilitários de formatação e a regressão de acessibilidade acima) e 6 testes E2E
+(Playwright, reescritos — os antigos testavam o widget de debug `ApiStatus` removido nesta
+etapa) rodando contra o dev server real e a API/Postgres/Redis reais, cobrindo: navegação
+Home → listagem, sucesso/erro na Home, filtros com rótulos acessíveis, busca sem resultado
+(estado vazio), slug inexistente (404) e a página de detalhe completa de um cruzeiro real.
+Screenshots (Playwright, desktop e mobile) inspecionadas visualmente para os quatro estados.
+
+**Decisões de escopo:** os widgets de debug (`ApiStatus`, `health.service`) foram removidos —
+eram apropriados para o bootstrap inicial, não para um "produto real de turismo", e sua função de
+verificação é superada pelas páginas reais (API fora do ar agora aparece como estado de erro de
+verdade, não como um badge de status). "Atrações" foi interpretado como os `Venue`s do navio
+(teatro, lounge, deck) — não existe uma entidade "Atração" própria no catálogo (ADR-0007 detalha
+o porquê). Checkout/reserva continuam fora de escopo, como já definido.
+
+**Por quê:** o pedido foi explícito em não parecer "CRUD administrativo" e em priorizar UX,
+responsividade, acessibilidade e consistência visual — a mesma disciplina das etapas anteriores
+(testar contra infraestrutura real, não assumir que algo funciona) encontrou um bug de
+acessibilidade real que contradizia o próprio pedido, corrigido antes de declarar a etapa pronta.
+
 <!-- Novas entradas são adicionadas ao final, em ordem cronológica, cada uma com data, "O quê" e "Por quê". -->

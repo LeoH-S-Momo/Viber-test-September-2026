@@ -9,15 +9,34 @@ import type {
 import { PrismaService } from '../../../database/prisma/prisma.service';
 import { toSkipTake } from '../domain/pagination';
 
+/**
+ * Detalhe publico de um cruzeiro: tudo que a pagina de detalhe do frontend
+ * precisa numa unica chamada (navio + suas venues/restaurantes, itinerario,
+ * preco por categoria, eventos, experiencias) — evita 3-4 round-trips
+ * separados por pagina.
+ */
 export const CRUISE_DETAIL_INCLUDE = {
-  ship: { select: { id: true, name: true, passengerCapacity: true } },
+  ship: {
+    select: {
+      id: true,
+      name: true,
+      description: true,
+      passengerCapacity: true,
+      yearBuilt: true,
+      venues: { orderBy: { name: 'asc' as const } },
+      restaurants: {
+        orderBy: { name: 'asc' as const },
+        include: { diningSlots: { orderBy: { startTime: 'asc' as const } } },
+      },
+    },
+  },
   organizer: { select: { id: true, name: true, slug: true } },
   embarkationPort: true,
   disembarkationPort: true,
   itineraryStops: { include: { port: true }, orderBy: { dayNumber: 'asc' as const } },
-  cabinPricings: { include: { cabinCategory: true } },
-  events: { include: { venue: true, artist: true } },
-  experiences: true,
+  cabinPricings: { include: { cabinCategory: true }, orderBy: { price: 'asc' as const } },
+  events: { include: { venue: true, artist: true }, orderBy: { startAt: 'asc' as const } },
+  experiences: { orderBy: { title: 'asc' as const } },
 } as const;
 
 const CRUISE_SUMMARY_SELECT = {
@@ -41,33 +60,57 @@ type CruiseSummary = Prisma.CruiseGetPayload<{ select: typeof CRUISE_SUMMARY_SEL
 export class CruisesRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Filtros que vivem no proprio Cruise (sem o preco — ver `priceFilter`). */
+  /**
+   * Filtros que vivem no proprio Cruise (sem o preco — ver `priceFilter`).
+   * Cada filtro vira uma entrada de `AND` em vez de propriedades soltas no
+   * mesmo objeto — necessario porque `destination` e `q` cada um precisa do
+   * seu proprio grupo `OR` isolado; misturar os dois num unico `where.OR`
+   * faria um filtro sobrescrever o outro em vez de combinar com E logico.
+   */
   private buildCruiseWhere(
     query: CruiseQuery,
     forcedStatus?: CruiseStatus,
   ): Prisma.CruiseWhereInput {
-    const where: Prisma.CruiseWhereInput = {
-      status: forcedStatus ?? query.status,
-      organizerId: query.organizerId,
-      theme: query.theme ? { contains: query.theme, mode: 'insensitive' } : undefined,
-    };
+    const and: Prisma.CruiseWhereInput[] = [];
 
+    const status = forcedStatus ?? query.status;
+    if (status) {
+      and.push({ status });
+    }
+    if (query.organizerId) {
+      and.push({ organizerId: query.organizerId });
+    }
+    if (query.theme) {
+      and.push({ theme: { contains: query.theme, mode: 'insensitive' } });
+    }
     if (query.embarkationFrom || query.embarkationTo) {
-      where.embarkationDate = { gte: query.embarkationFrom, lte: query.embarkationTo };
+      and.push({
+        embarkationDate: { gte: query.embarkationFrom, lte: query.embarkationTo },
+      });
     }
-
     if (query.destination) {
-      where.OR = [
-        { embarkationPort: { name: { contains: query.destination, mode: 'insensitive' } } },
-        {
-          itineraryStops: {
-            some: { port: { name: { contains: query.destination, mode: 'insensitive' } } },
+      and.push({
+        OR: [
+          { embarkationPort: { name: { contains: query.destination, mode: 'insensitive' } } },
+          {
+            itineraryStops: {
+              some: { port: { name: { contains: query.destination, mode: 'insensitive' } } },
+            },
           },
-        },
-      ];
+        ],
+      });
+    }
+    if (query.q) {
+      and.push({
+        OR: [
+          { title: { contains: query.q, mode: 'insensitive' } },
+          { theme: { contains: query.q, mode: 'insensitive' } },
+          { description: { contains: query.q, mode: 'insensitive' } },
+        ],
+      });
     }
 
-    return where;
+    return and.length > 0 ? { AND: and } : {};
   }
 
   private priceFilter(query: CruiseQuery): Prisma.DecimalFilter | undefined {

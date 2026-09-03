@@ -52,6 +52,8 @@ export const SortOrderSchema = z.enum(["asc", "desc"]);
 
 export const CruiseQuerySchema = z
   .object({
+    /** Busca livre — casa contra title/theme/description (ver CruisesRepository). */
+    q: z.string().max(150).optional(),
     theme: z.string().max(60).optional(),
     destination: z.string().max(150).optional(),
     embarkationFrom: z.coerce.date().optional(),

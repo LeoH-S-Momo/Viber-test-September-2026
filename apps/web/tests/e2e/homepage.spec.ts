@@ -1,20 +1,22 @@
 import { expect, test } from '@playwright/test';
 
-test('homepage shows the SeaPass status page', async ({ page }) => {
+test('homepage shows the hero and links to the cruise catalog', async ({ page }) => {
   await page.goto('/');
 
-  await expect(page.getByRole('heading', { name: 'SeaPass' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /viva experiências únicas em alto mar/i })).toBeVisible();
+
+  await page.getByRole('link', { name: /explorar cruzeiros/i }).first().click();
+  await expect(page).toHaveURL(/\/cruzeiros$/);
 });
 
-test('homepage reports the real API status once the client fetch resolves', async ({ page }) => {
+test('homepage renders real cruises from the API or falls back to an error state', async ({ page }) => {
   await page.goto('/');
 
-  // Nao assume um status especifico (saudavel, degradado ou inalcancavel dependendo do que
-  // estiver rodando ao lado do web) nem tenta flagrar o estado transitorio de "carregando" —
-  // em localhost o fetch real costuma resolver rapido demais para isso ser confiavel.
-  // A garantia que este teste verifica e que o fetch para /health acontece de fato e o
-  // componente sai do loading com um resultado conclusivo.
-  await expect(page.getByText(/api conectada|api indisponível/i)).toBeVisible({
-    timeout: 10_000,
-  });
+  // Nao assume que a API tem cruzeiros cadastrados nem que esta no ar — verifica que a
+  // pagina chega a um dos dois estados conclusivos (sucesso com cards reais, ou erro), nunca
+  // fica presa em loading nem quebra com uma excecao nao tratada.
+  const cruiseCard = page.getByRole('link', { name: /ver detalhes/i }).first();
+  const errorState = page.getByText(/não foi possível carregar esta página/i);
+
+  await expect(cruiseCard.or(errorState)).toBeVisible({ timeout: 10_000 });
 });

@@ -137,12 +137,27 @@ curl "http://localhost:3333/cruises?theme=Rock&sortBy=price&sortOrder=asc&page=1
 curl "http://localhost:3333/cruises/rock-in-sea-classicos-do-rock"
 ```
 
+## Frontend público
+
+Home, exploração de cruzeiros (`/cruzeiros` — busca livre, filtros de tema/destino/data/preço,
+ordenação, tudo refletido na URL) e página de detalhe (`/cruzeiros/[slug]` — hero, itinerário,
+atrações do navio, eventos, experiências, restaurantes, categorias de cabine), integrados à API
+real via Server Components. Estados de loading, erro, vazio e sucesso tratados explicitamente em
+cada página. Racional de decisões (Server Components vs. TanStack Query, `ServiceResult<T>` para
+erro, etc.) em [ADR-0007](docs/architecture/decisions/0007-public-frontend.md).
+
+```bash
+# Com a API rodando em :3333, abrir o site publico
+pnpm --filter @seapass/web dev   # http://localhost:3000
+```
+
 ## Status
 
-Fase atual: bootstrap do monorepo, camada de persistência, autenticação/autorização e módulo de
-catálogo concluídos — frontend e backend sobem localmente, banco modelado (28 tabelas) e migrado,
-seed de demonstração funcionando, auth completa (cadastro, login, refresh com rotação, logout,
-recuperação de senha) com RBAC por papel e por posse de recurso, catálogo completo (12 entidades,
-cruzeiros com publish/unpublish/filtros/paginação/ordenação), health check e documentação de API
-no ar. Checkout e pagamento ainda não implementados. Ver `docs/DEVLOG.md` para o histórico e
+Fase atual: bootstrap do monorepo, camada de persistência, autenticação/autorização, módulo de
+catálogo e frontend público concluídos — frontend e backend sobem localmente, banco modelado (28
+tabelas) e migrado, seed de demonstração funcionando, auth completa (cadastro, login, refresh com
+rotação, logout, recuperação de senha) com RBAC por papel e por posse de recurso, catálogo
+completo (12 entidades, cruzeiros com publish/unpublish/filtros/paginação/ordenação), frontend
+público (Home, exploração, detalhe) integrado à API real, health check e documentação de API no
+ar. Checkout e pagamento ainda não implementados. Ver `docs/DEVLOG.md` para o histórico e
 `docs/product/BACKLOG.md` para o roadmap priorizado.

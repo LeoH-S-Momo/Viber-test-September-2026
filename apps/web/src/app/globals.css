@@ -1,1 +1,37 @@
 @import "tailwindcss";
+
+@theme {
+  /* Paleta "oceano" — azul-petroleo profundo como cor de marca, coral/laranja
+     como destaque de acao (CTAs). Escolhida para o SeaPass parecer um
+     produto de turismo/eventos, nao um painel administrativo generico. */
+  --color-brand-50: #eff9fb;
+  --color-brand-100: #d7f0f5;
+  --color-brand-200: #b3e2eb;
+  --color-brand-300: #80cdda;
+  --color-brand-400: #47adc0;
+  --color-brand-500: #2790a6;
+  --color-brand-600: #1d7389;
+  --color-brand-700: #1b5d70;
+  --color-brand-800: #1c4c5c;
+  --color-brand-900: #1a404d;
+  --color-brand-950: #0d2530;
+
+  --color-accent-50: #fff4ed;
+  --color-accent-100: #ffe6d5;
+  --color-accent-200: #ffc9aa;
+  --color-accent-300: #ffa574;
+  --color-accent-400: #ff7a3c;
+  --color-accent-500: #fb5a17;
+  --color-accent-600: #ec3f0d;
+  --color-accent-700: #c42d0d;
+  --color-accent-800: #9c2513;
+  --color-accent-900: #7e2113;
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
+}
+
+body {
+  background-color: #f8fafc;
+  color: #0f172a;
+}
