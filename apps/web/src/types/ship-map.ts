@@ -4,7 +4,7 @@ import type { CabinCategory } from './cruise';
  * Estado de disponibilidade de uma cabine PARA UM cruzeiro especifico —
  * espelha CabinAvailabilityPolicy no backend (apps/api/.../domain).
  */
-export type CabinAvailability = 'AVAILABLE' | 'ON_HOLD' | 'BOOKED' | 'UNAVAILABLE';
+export type CabinAvailability = 'AVAILABLE' | 'HELD' | 'BOOKED' | 'UNAVAILABLE';
 
 export type VenueType = 'THEATER' | 'LOUNGE' | 'BAR' | 'POOL' | 'LEISURE' | 'OTHER';
 

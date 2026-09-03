@@ -155,7 +155,7 @@ pnpm --filter @seapass/web dev   # http://localhost:3000
 
 Na página de detalhe do cruzeiro: seleção de deck, zoom/pan, cabines e instalações (teatro,
 lounge, bar, piscina, área de lazer, restaurantes) clicáveis com tooltip, painel de detalhe,
-legenda e 4 estados reais de disponibilidade de cabine (`AVAILABLE`/`ON_HOLD`/`BOOKED`/
+legenda e 4 estados reais de disponibilidade de cabine (`AVAILABLE`/`HELD`/`BOOKED`/
 `UNAVAILABLE`, calculados por `CabinAvailabilityPolicy` a partir das reservas do cruzeiro). Planta
 gerada por uma função pura no frontend a partir dos dados reais do deck (sem coordenadas
 inventadas no banco). Racional completo em
@@ -166,13 +166,35 @@ inventadas no banco). Racional completo em
 curl "http://localhost:3333/cruises/rock-in-sea-classicos-do-rock/deck-map"
 ```
 
+## Motor de disponibilidade de cabine
+
+Reserva temporária (hold) de cabine, com garantia real contra overbooking: `POST
+/cruises/:slug/cabins/:cabinId/hold` (`AVAILABLE` → `HELD`, expira sozinho após
+`CABIN_HOLD_MINUTES`, default 15), `POST /bookings/:id/confirm` (`HELD` → `CONFIRMED`), `/cancel`
+e `/release`, e `GET /cruises/:slug/cabins/:cabinId/availability` para consulta. Concorrência
+resolvida com transação Postgres + `SELECT ... FOR UPDATE` na cabine (serializa tentativas
+simultâneas de verdade) + índice único parcial como rede de segurança; BullMQ agenda a expiração
+proativa de cada hold (UX, não a garantia de corretude em si). Racional completo — incluindo por
+que a estratégia evita overbooking e o que foi descartado — em
+[ADR-0009](docs/architecture/decisions/0009-cabin-hold-engine.md).
+
+```bash
+TOKEN=$(curl -s -X POST localhost:3333/auth/login -H "Content-Type: application/json" \
+  -d '{"email":"passageiro1@example.com","password":"Seapass@123"}' | jq -r .accessToken)
+curl -s -X POST localhost:3333/cruises/rock-in-sea-classicos-do-rock/cabins/<cabinId>/hold \
+  -H "Authorization: Bearer $TOKEN"
+```
+
 ## Status
 
 Fase atual: bootstrap do monorepo, camada de persistência, autenticação/autorização, módulo de
-catálogo, frontend público e mapa interativo do navio concluídos — frontend e backend sobem
-localmente, banco modelado (28 tabelas) e migrado, seed de demonstração funcionando, auth completa
-(cadastro, login, refresh com rotação, logout, recuperação de senha) com RBAC por papel e por
-posse de recurso, catálogo completo (12 entidades, cruzeiros com publish/unpublish/filtros/
-paginação/ordenação), frontend público (Home, exploração, detalhe, mapa do navio) integrado à API
-real, health check e documentação de API no ar. Checkout e pagamento ainda não implementados. Ver
-`docs/DEVLOG.md` para o histórico e `docs/product/BACKLOG.md` para o roadmap priorizado.
+catálogo, frontend público, mapa interativo do navio e motor de disponibilidade de cabine
+concluídos — frontend e backend sobem localmente, banco modelado (28 tabelas) e migrado, seed de
+demonstração funcionando, auth completa (cadastro, login, refresh com rotação, logout, recuperação
+de senha) com RBAC por papel e por posse de recurso, catálogo completo (12 entidades, cruzeiros
+com publish/unpublish/filtros/paginação/ordenação), frontend público (Home, exploração, detalhe,
+mapa do navio) integrado à API real, hold de cabine com garantia real contra concorrência (testada
+com tentativas simultâneas de verdade contra Postgres), health check e documentação de API no ar.
+Checkout (pagamento, hóspedes, emissão de ingresso a partir de uma reserva confirmada) ainda não
+implementado. Ver `docs/DEVLOG.md` para o histórico e `docs/product/BACKLOG.md` para o roadmap
+priorizado.

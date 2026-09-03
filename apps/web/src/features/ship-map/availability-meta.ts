@@ -25,7 +25,7 @@ export const AVAILABILITY_META: Record<
     swatchClassName: 'border-emerald-600 bg-emerald-200',
     badgeTone: 'success',
   },
-  ON_HOLD: {
+  HELD: {
     label: 'Em reserva (temporário)',
     description: 'Outro passageiro está finalizando o checkout — pode liberar em instantes.',
     className: 'fill-amber-200 stroke-amber-600 hover:fill-amber-300',

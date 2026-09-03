@@ -674,7 +674,7 @@ function requireValue<T>(value: T | undefined, label: string): T {
 /**
  * Estados de disponibilidade reais para o mapa interativo do navio (ver
  * CabinAvailabilityPolicy) — sem isto, toda cabine apareceria como
- * disponivel e os estados BOOKED/ON_HOLD/UNAVAILABLE nunca seriam
+ * disponivel e os estados BOOKED/HELD/UNAVAILABLE nunca seriam
  * demonstrados contra dados de verdade.
  */
 async function seedCabinAvailabilityDemoData(

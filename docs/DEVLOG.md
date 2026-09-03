@@ -446,4 +446,61 @@ nunca simular o que a API real já pode fazer) levou a modelar disponibilidade c
 negócio de verdade (não um campo decorativo) e a preparar — sem implementar — o ponto de extensão
 que o checkout vai precisar mais adiante.
 
+## 2026-09-03 — Motor de disponibilidade de cabine (hold, concorrência, expiração)
+
+**O quê:** implementado o motor completo de reserva temporária de cabine — consulta de
+disponibilidade, criação de hold, confirmação, cancelamento, liberação e expiração — com garantia
+real (não só documentada) de que duas pessoas não conseguem reservar a mesma cabine ao mesmo
+tempo. Racional completo, incluindo por que a estratégia de concorrência escolhida evita
+overbooking, em [ADR-0009](architecture/decisions/0009-cabin-hold-engine.md).
+
+**Terminologia:** `BookingStatus.PENDING` foi renomeado para `HELD` (migration `ALTER TYPE ...
+RENAME VALUE`, sem perda de dado) — o pedido nomeia os 3 estados explicitamente como
+AVAILABLE/HELD/BOOKED, e manter `PENDING` no schema enquanto o código só *chamava* isso de "hold"
+em comentários era confuso. `CabinAvailabilityPolicy` (do mapa do navio, ADR-0008) foi ajustada
+para o mesmo vocabulário — é a primeira funcionalidade a de fato *escrever* os estados que aquela
+policy até então só projetava para leitura.
+
+**Estratégia de concorrência (o núcleo do pedido):** transação Prisma + `SELECT ... FOR UPDATE` na
+linha da cabine, que serializa de verdade tentativas concorrentes de hold (a segunda transação
+bloqueia até a primeira commitar, depois re-lê o estado já consolidado) — mais expiração inline do
+hold antigo dentro da mesma transação/lock, mais um índice único parcial no Postgres
+(`CREATE UNIQUE INDEX ... WHERE status IN ('HELD','CONFIRMED')`) como rede de segurança caso um
+bug futuro pule a transação. Avaliei e descartei lock distribuído via Redis como mecanismo
+*primário* — o Postgres já é a fonte da verdade transacional, um lock Redis por cima seria uma
+segunda fonte de verdade que pode divergir, exatamente o tipo de "solução artificial" que o pedido
+pediu para evitar. Redis/BullMQ entram numa função secundária, genuinamente justificada: agendar a
+expiração *proativa* de cada hold (job com delay = tempo até `holdExpiresAt`) para boa UX — nunca
+a garantia de corretude, que já está fechada pela camada 1 (expiração inline no próximo
+hold-attempt da mesma cabine fecha o ciclo mesmo se o job nunca rodar).
+
+**Testes de concorrência de verdade:** `cabin-hold-concurrency.e2e-spec.ts` dispara `Promise.all`
+de 12 tentativas de hold **verdadeiramente simultâneas** (sem `await` entre os disparos) para a
+mesma cabine, de 12 passageiros registrados de verdade, contra Postgres real — e verifica que
+exatamente 1 recebe `201` e as outras 11 recebem `409`, checado tanto pela resposta HTTP quanto
+pelo estado real do banco. Repete para a corrida em cima de uma reserva já existente (8 tentativas
+concorrentes de confirmar, depois de liberar, a mesma reserva). `bookings.e2e-spec.ts` cobre o
+ciclo de vida completo fora da corrida (posse entre usuários reais, cruzeiro não publicado, cabine
+em manutenção, fechamento real do ciclo de expiração forçando `holdExpiresAt` pro passado). Mais
+16 testes unitários da política pura de transição de estados e 16 do service com repositório
+mockado. Total: 101 testes unitários (+34 desde a etapa anterior) e 4 suítes de integração.
+
+**Dois obstáculos técnicos reais, resolvidos:**
+1. `@nestjs/bullmq`/`@nestjs/bull-shared` publicam só ESM — quebrava o Jest (que por padrão nunca
+   transforma `node_modules`) tanto nos testes unitários (`BookingsService` importa `InjectQueue`)
+   quanto nos de integração (o app inteiro precisa do `BullModule`). Nos unitários, mockei
+   `@nestjs/bullmq` (só a assinatura do decorator, já que o teste instancia o service com `new`,
+   sem o container do Nest). Nos de integração, ajustei `transformIgnorePatterns` pra deixar o
+   ts-jest transformar especificamente esses dois pacotes.
+2. O BullMQ mantém a conexão Redis dedicada e timers internos vivos mesmo depois de `app.close()`
+   — Jest nunca via o processo terminar sozinho nos testes de integração. Adicionado `--forceExit`
+   ao script `test:integration` (mitigação padrão recomendada pelo próprio Jest pra esse cenário;
+   os testes já reportam passar/falhar antes do force-exit acontecer).
+
+**Por quê:** o pedido chamou isto de "uma parte crítica do projeto" e pediu explicitamente para
+não usar uma solução artificial só pra passar no teste, e para documentar por que a estratégia
+escolhida evita overbooking de verdade — a mesma disciplina desta conversa (testar contra
+infraestrutura real, provar em vez de assumir) levou a escrever um teste que dispara concorrência
+de verdade contra o Postgres real, não uma simulação sequencial disfarçada de concorrente.
+
 <!-- Novas entradas são adicionadas ao final, em ordem cronológica, cada uma com data, "O quê" e "Por quê". -->

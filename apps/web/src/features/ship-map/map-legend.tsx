@@ -2,7 +2,7 @@ import { AVAILABILITY_META } from './availability-meta';
 import { RESTAURANT_META, VENUE_TYPE_META } from './venue-type-meta';
 import type { CabinAvailability, VenueType } from '@/types/ship-map';
 
-const AVAILABILITY_ORDER: CabinAvailability[] = ['AVAILABLE', 'ON_HOLD', 'BOOKED', 'UNAVAILABLE'];
+const AVAILABILITY_ORDER: CabinAvailability[] = ['AVAILABLE', 'HELD', 'BOOKED', 'UNAVAILABLE'];
 const VENUE_TYPE_ORDER: VenueType[] = ['THEATER', 'LOUNGE', 'BAR', 'POOL', 'LEISURE', 'OTHER'];
 
 export function MapLegend() {
