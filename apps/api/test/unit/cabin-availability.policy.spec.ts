@@ -24,21 +24,21 @@ describe('CabinAvailabilityPolicy', () => {
       expect(CabinAvailabilityPolicy.resolve(CabinStatus.ACTIVE, booking)).toBe('BOOKED');
     });
 
-    it('is ON_HOLD for a PENDING booking whose hold has not expired yet', () => {
+    it('is HELD for a HELD booking whose hold has not expired yet', () => {
       const now = new Date('2026-06-01T12:00:00Z');
-      const booking = { status: BookingStatus.PENDING, holdExpiresAt: new Date('2026-06-01T12:10:00Z') };
-      expect(CabinAvailabilityPolicy.resolve(CabinStatus.ACTIVE, booking, now)).toBe('ON_HOLD');
+      const booking = { status: BookingStatus.HELD, holdExpiresAt: new Date('2026-06-01T12:10:00Z') };
+      expect(CabinAvailabilityPolicy.resolve(CabinStatus.ACTIVE, booking, now)).toBe('HELD');
     });
 
-    it('is AVAILABLE again for a PENDING booking whose hold already expired', () => {
+    it('is AVAILABLE again for a HELD booking whose hold already expired', () => {
       const now = new Date('2026-06-01T12:00:00Z');
-      const booking = { status: BookingStatus.PENDING, holdExpiresAt: new Date('2026-06-01T11:50:00Z') };
+      const booking = { status: BookingStatus.HELD, holdExpiresAt: new Date('2026-06-01T11:50:00Z') };
       expect(CabinAvailabilityPolicy.resolve(CabinStatus.ACTIVE, booking, now)).toBe('AVAILABLE');
     });
 
-    it('is ON_HOLD for a PENDING booking with no holdExpiresAt set', () => {
-      const booking = { status: BookingStatus.PENDING, holdExpiresAt: null };
-      expect(CabinAvailabilityPolicy.resolve(CabinStatus.ACTIVE, booking)).toBe('ON_HOLD');
+    it('is HELD for a HELD booking with no holdExpiresAt set', () => {
+      const booking = { status: BookingStatus.HELD, holdExpiresAt: null };
+      expect(CabinAvailabilityPolicy.resolve(CabinStatus.ACTIVE, booking)).toBe('HELD');
     });
   });
 });

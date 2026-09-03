@@ -48,7 +48,7 @@ export class OrganizersService {
                 where: {
                   cruiseId,
                   cabinId: { in: cabinIds },
-                  status: { in: ['PENDING', 'CONFIRMED'] },
+                  status: { in: ['HELD', 'CONFIRMED'] },
                 },
               });
 

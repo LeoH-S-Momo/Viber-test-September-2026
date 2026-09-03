@@ -73,8 +73,12 @@ enum DocumentType {
   NATIONAL_ID
 }
 
+/// HELD = reserva temporaria (hold) enquanto o checkout esta em andamento —
+/// ver CabinHoldPolicy/BookingsService para a maquina de estados completa
+/// (AVAILABLE -> HELD -> CONFIRMED, ou HELD -> CANCELLED por expiracao,
+/// cancelamento ou liberacao).
 enum BookingStatus {
-  PENDING
+  HELD
   CONFIRMED
   CANCELLED
   COMPLETED
@@ -577,9 +581,9 @@ model Experience {
 // ============================================================================
 // BOOKINGS / GUESTS / PAYMENTS / TICKETS / CHECK-INS / COUPONS
 // ============================================================================
-// Modelado agora para integridade referencial completa do dominio, mas SEM
-// logica de negocio nem dados de seed (ver docs/product/BACKLOG.md — o fluxo
-// de reserva/pagamento e a proxima etapa de implementacao, nao esta).
+// O motor de hold/disponibilidade de cabine (AVAILABLE -> HELD -> CONFIRMED)
+// esta implementado — ver ADR-0009. Guests/pagamento/emissao de ingresso a
+// partir de uma reserva CONFIRMED ainda nao (ver docs/product/BACKLOG.md).
 
 model Booking {
   id                 String        @id @default(cuid())
@@ -587,13 +591,14 @@ model Booking {
   cruiseId           String
   cabinId            String
   couponId           String?
-  status             BookingStatus @default(PENDING)
+  status             BookingStatus @default(HELD)
   totalAmount        Decimal       @db.Decimal(10, 2)
   discountAmount     Decimal?      @db.Decimal(10, 2)
   currency           String        @default("BRL")
-  /// Bloqueio temporario da cabine durante o checkout (ver ADR de arquitetura
-  /// sobre hold de cabine via Redis) — expirado, a reserva volta para
-  /// disponivel se nunca sair de PENDING.
+  /// Bloqueio temporario da cabine durante o checkout — ver ADR-0009
+  /// (CabinHoldPolicy/BookingsService). Expirado, a reserva volta para
+  /// disponivel se nunca sair de HELD (o job de expiracao ou o proximo
+  /// hold-attempt para a mesma cabine fecham o ciclo cancelando-a).
   holdExpiresAt      DateTime?
   confirmedAt        DateTime?
   cancelledAt        DateTime?

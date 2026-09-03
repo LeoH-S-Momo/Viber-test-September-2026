@@ -8,14 +8,14 @@ export class CabinsRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * Reservas que hoje bloqueiam uma cabine PARA ESTE cruzeiro (PENDING com
+   * Reservas que hoje bloqueiam uma cabine PARA ESTE cruzeiro (HELD com
    * hold ainda valido, ou CONFIRMED) — usado por CabinAvailabilityPolicy no
    * mapa do navio. CANCELLED/REFUNDED/COMPLETED nunca bloqueiam, por isso
    * ficam de fora do filtro.
    */
   findActiveBookingsForCruise(cruiseId: string) {
     return this.prisma.booking.findMany({
-      where: { cruiseId, status: { in: [BookingStatus.PENDING, BookingStatus.CONFIRMED] } },
+      where: { cruiseId, status: { in: [BookingStatus.HELD, BookingStatus.CONFIRMED] } },
       select: { cabinId: true, status: true, holdExpiresAt: true },
     });
   }

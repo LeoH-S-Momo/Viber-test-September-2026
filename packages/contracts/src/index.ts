@@ -16,6 +16,4 @@ export * from './catalog/artist.schema';
 export * from './catalog/venue.schema';
 export * from './catalog/restaurant.schema';
 export * from './catalog/itinerary-stop.schema';
-
-// Os demais schemas de dominio (booking) serao adicionados aqui conforme as
-// features correspondentes forem implementadas.
+export * from './booking/booking.schema';

@@ -6,6 +6,8 @@ export const envSchema = z.object({
 
   DATABASE_URL: z.string().url(),
   REDIS_URL: z.string().url(),
+  /** Duracao do hold temporario de cabine (ver ADR-0009) — minutos ate um HELD expirar sozinho. */
+  CABIN_HOLD_MINUTES: z.coerce.number().int().positive().default(15),
 
   JWT_ACCESS_SECRET: z.string().min(1),
   JWT_REFRESH_SECRET: z.string().min(1),

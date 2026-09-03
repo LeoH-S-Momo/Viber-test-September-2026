@@ -722,9 +722,10 @@ async function seedCabinAvailabilityDemoData(
     },
   });
 
-  // Hold de checkout ainda valido — cabine 8302 aparece como "ON_HOLD". O
-  // hold e reajustado a cada reseed para nunca aparecer expirado em dev.
-  const holdExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
+  // Hold de checkout ainda valido — cabine 8302 aparece como "HELD". O hold
+  // e reajustado a cada reseed para nunca aparecer expirado em dev (mesma
+  // duracao do default de CABIN_HOLD_MINUTES — ver ADR-0009).
+  const holdExpiresAt = new Date(Date.now() + 15 * 60 * 1000);
   await prisma.booking.upsert({
     where: { id: 'seed-booking-pending-hold' },
     update: { holdExpiresAt },
@@ -733,7 +734,7 @@ async function seedCabinAvailabilityDemoData(
       userId: users.passenger1.id,
       cruiseId,
       cabinId: varandaCabin.id,
-      status: 'PENDING',
+      status: 'HELD',
       totalAmount: varandaPricing.price,
       currency: varandaPricing.currency,
       holdExpiresAt,

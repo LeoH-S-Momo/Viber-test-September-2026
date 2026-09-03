@@ -4,9 +4,11 @@ import { BookingStatus, CabinStatus } from '@prisma/client';
  * Estado de disponibilidade de UMA cabine PARA UM cruzeiro especifico — a
  * mesma cabine fisica pode estar disponivel num sailing e reservada noutro,
  * entao isto nunca e uma propriedade da Cabin isolada, so faz sentido cruzada
- * com as reservas ativas daquele cruzeiro.
+ * com as reservas ativas daquele cruzeiro. Mesmos 3 nomes de estado do motor
+ * de hold (ver ADR-0009: AVAILABLE -> HELD -> BOOKED), mais UNAVAILABLE para
+ * cabines fora de operacao (eixo ortogonal — nao depende de reserva).
  */
-export type CabinAvailability = 'AVAILABLE' | 'ON_HOLD' | 'BOOKED' | 'UNAVAILABLE';
+export type CabinAvailability = 'AVAILABLE' | 'HELD' | 'BOOKED' | 'UNAVAILABLE';
 
 export interface ActiveCabinBooking {
   status: BookingStatus;
@@ -33,13 +35,13 @@ export class CabinAvailabilityPolicy {
     if (activeBooking.status === BookingStatus.CONFIRMED) {
       return 'BOOKED';
     }
-    // PENDING: hold expirado volta a ficar disponivel (ver comentario de
-    // Booking.holdExpiresAt no schema.prisma) — nunca sai do PENDING sozinho,
-    // entao aqui e so leitura, quem escreve o cancelamento e o job de
-    // expiracao (fora de escopo desta etapa).
+    // HELD: hold expirado volta a ficar disponivel (ver ADR-0009) — nunca
+    // sai do HELD sozinho, entao esta leitura e so uma projecao; quem
+    // efetivamente cancela a reserva expirada e o proximo hold-attempt
+    // para a mesma cabine (dentro da transacao) ou o job de expiracao.
     if (activeBooking.holdExpiresAt && activeBooking.holdExpiresAt.getTime() <= now.getTime()) {
       return 'AVAILABLE';
     }
-    return 'ON_HOLD';
+    return 'HELD';
   }
 }

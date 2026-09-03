@@ -1,7 +1,9 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { BullModule } from '@nestjs/bullmq';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { LoggerModule } from 'nestjs-pino';
+import Redis from 'ioredis';
 import { validateEnv } from './config/env.schema';
 import { PrismaModule } from './database/prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
@@ -37,6 +39,16 @@ import { AdminModule } from './modules/admin/admin.module';
     }),
     PrismaModule,
     RedisModule,
+    // Conexao dedicada (nao a RedisService geral) — BullMQ exige
+    // `maxRetriesPerRequest: null` para os comandos bloqueantes do Worker,
+    // o que conflita com o `maxRetriesPerRequest: 1` (fail-fast) da conexao
+    // usada pelo resto da app (health check, cache futuro). Ver ADR-0009.
+    BullModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        connection: new Redis(config.getOrThrow<string>('REDIS_URL'), { maxRetriesPerRequest: null }),
+      }),
+    }),
     AuditLogModule,
     HealthModule,
     UsersModule,
