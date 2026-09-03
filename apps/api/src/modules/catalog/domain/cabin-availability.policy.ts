@@ -35,10 +35,12 @@ export class CabinAvailabilityPolicy {
     if (activeBooking.status === BookingStatus.CONFIRMED) {
       return 'BOOKED';
     }
-    // HELD: hold expirado volta a ficar disponivel (ver ADR-0009) — nunca
-    // sai do HELD sozinho, entao esta leitura e so uma projecao; quem
-    // efetivamente cancela a reserva expirada e o proximo hold-attempt
-    // para a mesma cabine (dentro da transacao) ou o job de expiracao.
+    // HELD ou PAYMENT_PENDING (ver ADR-0010: a cabine continua bloqueada
+    // durante o checkout, nao so durante o hold inicial) — hold expirado
+    // volta a ficar disponivel; nunca sai do estado sozinho, entao esta
+    // leitura e so uma projecao. Quem efetivamente fecha o ciclo e o
+    // proximo hold-attempt pra mesma cabine (dentro da transacao) ou o job
+    // de expiracao.
     if (activeBooking.holdExpiresAt && activeBooking.holdExpiresAt.getTime() <= now.getTime()) {
       return 'AVAILABLE';
     }

@@ -178,7 +178,7 @@ describe('Cabin hold concurrency (integration)', () => {
     // que sobrou (Jest roda os `it` deste arquivo em ordem sequencial).
   });
 
-  it('lets exactly one of N concurrent confirm attempts on the same HELD booking succeed', async () => {
+  it('confirming payment concurrently N times is safe: idempotent by state, no double side effect', async () => {
     const active = await activeBookingsForCabin();
     const booking = active[0];
     expect(booking).toBeDefined();
@@ -188,17 +188,41 @@ describe('Cabin hold concurrency (integration)', () => {
     const ownerIndex = registrationIndexForUser(owner.userId);
     const token = passengerTokens[ownerIndex];
 
+    // Precisa de hospede + checkout antes de o pagamento poder ser confirmado.
+    await request(server())
+      .put(`/bookings/${booking!.id}/details`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        guests: [{ fullName: 'Titular Concorrencia', documentType: 'PASSPORT', documentNumber: 'CT123456', isPrimary: true }],
+      })
+      .expect(200);
+    await request(server())
+      .post(`/bookings/${booking!.id}/checkout`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ paymentMethod: 'PIX' })
+      .expect(200);
+
     const responses = await Promise.all(
       Array.from({ length: 8 }, () =>
-        request(server()).post(`/bookings/${booking!.id}/confirm`).set('Authorization', `Bearer ${token}`).send(),
+        request(server())
+          .post(`/bookings/${booking!.id}/confirm-payment`)
+          .set('Authorization', `Bearer ${token}`)
+          .send(),
       ),
     );
 
-    expect(responses.filter((r) => r.status === 200)).toHaveLength(1);
-    expect(responses.filter((r) => r.status === 409)).toHaveLength(responses.length - 1);
+    // confirmPayment e idempotente por estado (ADR-0010) — nao ha "perdedor" aqui: um
+    // retry de callback de gateway ja processado devolve o estado atual, nao um erro.
+    expect(responses.every((r) => r.status === 200)).toBe(true);
+    expect(responses.every((r) => r.body.status === 'CONFIRMED')).toBe(true);
 
     const confirmed = await prisma.booking.findUniqueOrThrow({ where: { id: booking!.id } });
     expect(confirmed.status).toBe('CONFIRMED');
+
+    // A prova de que nao houve efeito colateral duplicado: um unico Payment aprovado.
+    const payments = await prisma.payment.findMany({ where: { bookingId: booking!.id } });
+    expect(payments).toHaveLength(1);
+    expect(payments[0]?.status).toBe('APPROVED');
 
     await prisma.booking.update({
       where: { id: booking!.id },

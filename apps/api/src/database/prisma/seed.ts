@@ -1,5 +1,7 @@
-import { PrismaClient, RoleKey } from '@prisma/client';
+import { PrismaClient, Prisma, RoleKey } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
+import { CouponPolicy } from '../../modules/pricing/domain/coupon.policy';
+import { PricingEngine } from '../../modules/pricing/domain/pricing-engine';
 
 const prisma = new PrismaClient();
 
@@ -706,36 +708,118 @@ async function seedCabinAvailabilityDemoData(
     where: { cruiseId_cabinCategoryId: { cruiseId, cabinCategoryId: varandaCategoryId } },
   });
 
-  // Reserva confirmada — cabine 6202 aparece como "BOOKED" no mapa.
-  await prisma.booking.upsert({
-    where: { id: 'seed-booking-confirmed' },
+  // Cupom de demonstracao — 10% no cruzeiro de seed, valor minimo baixo o
+  // suficiente pra nunca bloquear as cabines de demonstracao, ainda com usos
+  // (globais e por usuario) sobrando. Ver docs/architecture/decisions/0011-pricing-engine.md.
+  const demoCoupon = await prisma.coupon.upsert({
+    where: { code: 'ROCKINSEA10' },
     update: {},
+    create: {
+      code: 'ROCKINSEA10',
+      discountType: 'PERCENTAGE',
+      discountValue: 10,
+      minPurchaseAmount: 500,
+      maxUses: 100,
+      usedCount: 1,
+      maxUsesPerUser: 3,
+      validFrom: new Date('2026-01-01T00:00:00Z'),
+      validUntil: new Date('2027-12-31T23:59:59Z'),
+      isActive: true,
+      applicableCruises: { create: [{ cruiseId }] },
+    },
+  });
+
+  const tourExperience = await prisma.experience.findFirstOrThrow({
+    where: { cruiseId, title: 'Tour pelos Bastidores do Show' },
+  });
+
+  // Reserva confirmada de ponta a ponta — cabine 6202 aparece como "BOOKED"
+  // no mapa, e demonstra o dominio completo (hospede titular, adicional
+  // selecionado, cupom aplicado, pagamento simulado aprovado). Preco
+  // calculado pelo mesmo PricingEngine/CouponPolicy usado em runtime, nao a
+  // mao, pra nunca divergir da regra real. 1 hospede (o titular criado logo
+  // abaixo) — entra na taxa de embarque por passageiro (ver ADR-0011).
+  const confirmedAddonPrices = [tourExperience.price ?? new Prisma.Decimal(0)];
+  const confirmedSubtotal = externaPricing.price.add(
+    confirmedAddonPrices.reduce((sum, price) => sum.add(price), new Prisma.Decimal(0)),
+  );
+  const confirmedBreakdown = PricingEngine.calculate({
+    cabinPrice: externaPricing.price,
+    passengerCount: 1,
+    addonPrices: confirmedAddonPrices,
+    discountAmount: CouponPolicy.computeDiscount(demoCoupon, confirmedSubtotal),
+  });
+  const confirmedBooking = await prisma.booking.upsert({
+    where: { id: 'seed-booking-confirmed' },
+    update: { couponId: demoCoupon.id, ...confirmedBreakdown },
     create: {
       id: 'seed-booking-confirmed',
       userId: users.passenger2.id,
       cruiseId,
       cabinId: externaCabin.id,
+      couponId: demoCoupon.id,
       status: 'CONFIRMED',
-      totalAmount: externaPricing.price,
+      ...confirmedBreakdown,
       currency: externaPricing.currency,
       confirmedAt: new Date(),
     },
   });
+  await prisma.bookingGuest.upsert({
+    where: { id: 'seed-guest-confirmed-primary' },
+    update: {},
+    create: {
+      id: 'seed-guest-confirmed-primary',
+      bookingId: confirmedBooking.id,
+      fullName: users.passenger2.fullName,
+      documentType: 'PASSPORT',
+      documentNumber: 'BR' + '9'.repeat(7),
+      isPrimary: true,
+    },
+  });
+  await prisma.bookingExperience.upsert({
+    where: { bookingId_experienceId: { bookingId: confirmedBooking.id, experienceId: tourExperience.id } },
+    update: {},
+    create: {
+      bookingId: confirmedBooking.id,
+      experienceId: tourExperience.id,
+      priceAtBooking: tourExperience.price ?? new Prisma.Decimal(0),
+    },
+  });
+  await prisma.payment.upsert({
+    where: { simulatedTransactionId: 'SIMULATED-SEED-CONFIRMED' },
+    update: { amount: confirmedBreakdown.totalAmount },
+    create: {
+      bookingId: confirmedBooking.id,
+      method: 'CREDIT_CARD',
+      status: 'APPROVED',
+      amount: confirmedBreakdown.totalAmount,
+      currency: externaPricing.currency,
+      simulatedTransactionId: 'SIMULATED-SEED-CONFIRMED',
+      paidAt: new Date(),
+    },
+  });
 
-  // Hold de checkout ainda valido — cabine 8302 aparece como "HELD". O hold
-  // e reajustado a cada reseed para nunca aparecer expirado em dev (mesma
+  // Hold de checkout ainda valido — cabine 8302 aparece como "HELD" (ainda
+  // sem hospedes informados, representando o meio do fluxo). O hold e
+  // reajustado a cada reseed para nunca aparecer expirado em dev (mesma
   // duracao do default de CABIN_HOLD_MINUTES — ver ADR-0009).
   const holdExpiresAt = new Date(Date.now() + 15 * 60 * 1000);
+  const heldBreakdown = PricingEngine.calculate({
+    cabinPrice: varandaPricing.price,
+    passengerCount: 0,
+    addonPrices: [],
+    discountAmount: new Prisma.Decimal(0),
+  });
   await prisma.booking.upsert({
     where: { id: 'seed-booking-pending-hold' },
-    update: { holdExpiresAt },
+    update: { holdExpiresAt, ...heldBreakdown },
     create: {
       id: 'seed-booking-pending-hold',
       userId: users.passenger1.id,
       cruiseId,
       cabinId: varandaCabin.id,
       status: 'HELD',
-      totalAmount: varandaPricing.price,
+      ...heldBreakdown,
       currency: varandaPricing.currency,
       holdExpiresAt,
     },

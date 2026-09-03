@@ -62,9 +62,10 @@ A API sobe mesmo que Postgres/Redis ainda não estejam prontos — o processo n�
 
 `pnpm db:seed` popula um cenário completo pronto para navegar: 2 organizadores (um aprovado, um
 pendente), 1 navio com 4 decks/categorias/22 cabines, 1 cruzeiro publicado com itinerário de 5
-dias, preços por categoria, eventos, restaurantes e experiências. Não popula reservas/pagamentos
-(fora de escopo desta etapa — ver `docs/product/BACKLOG.md`). É idempotente: pode rodar de novo
-sem duplicar dados.
+dias, preços por categoria, eventos, restaurantes e experiências, um cupom de desconto
+(`ROCKINSEA10`) e reservas de demonstração (uma `HELD` e uma `CONFIRMED` com hóspede, adicional,
+cupom e pagamento simulado aprovado — preço calculado pela mesma função pura do domínio de
+Booking, nunca digitado à mão). É idempotente: pode rodar de novo sem duplicar dados.
 
 Usuários de teste (senha para todos: `Seapass@123`):
 
@@ -170,12 +171,12 @@ curl "http://localhost:3333/cruises/rock-in-sea-classicos-do-rock/deck-map"
 
 Reserva temporária (hold) de cabine, com garantia real contra overbooking: `POST
 /cruises/:slug/cabins/:cabinId/hold` (`AVAILABLE` → `HELD`, expira sozinho após
-`CABIN_HOLD_MINUTES`, default 15), `POST /bookings/:id/confirm` (`HELD` → `CONFIRMED`), `/cancel`
-e `/release`, e `GET /cruises/:slug/cabins/:cabinId/availability` para consulta. Concorrência
-resolvida com transação Postgres + `SELECT ... FOR UPDATE` na cabine (serializa tentativas
-simultâneas de verdade) + índice único parcial como rede de segurança; BullMQ agenda a expiração
-proativa de cada hold (UX, não a garantia de corretude em si). Racional completo — incluindo por
-que a estratégia evita overbooking e o que foi descartado — em
+`CABIN_HOLD_MINUTES`, default 15), `/cancel` e `/release`, e `GET
+/cruises/:slug/cabins/:cabinId/availability` para consulta. Concorrência resolvida com transação
+Postgres + `SELECT ... FOR UPDATE` na cabine (serializa tentativas simultâneas de verdade) +
+índice único parcial como rede de segurança; BullMQ agenda a expiração proativa de cada hold (UX,
+não a garantia de corretude em si). Racional completo — incluindo por que a estratégia evita
+overbooking e o que foi descartado — em
 [ADR-0009](docs/architecture/decisions/0009-cabin-hold-engine.md).
 
 ```bash
@@ -185,16 +186,57 @@ curl -s -X POST localhost:3333/cruises/rock-in-sea-classicos-do-rock/cabins/<cab
   -H "Authorization: Bearer $TOKEN"
 ```
 
+## Domínio de Booking (hóspedes, adicionais, preço, checkout simulado)
+
+Fluxo completo cruzeiro → cabine → hóspedes → adicionais → reserva → checkout → confirmação de
+pagamento, sobre o motor de hold acima: `PUT /bookings/:id/details` (define hóspedes e adicionais,
+recalcula preço), `POST /bookings/:id/checkout` (`HELD` → `PAYMENT_PENDING`, cria um `Payment`
+simulado), `POST /bookings/:id/confirm-payment` (`PAYMENT_PENDING` → `CONFIRMED`, papel do
+callback de um gateway real que ainda não existe), além de `GET /bookings/me`, `GET /bookings/:id`
+e `POST /bookings/:id/cancel`. Preço sempre em quatro colunas explícitas (`subtotalAmount`,
+`discountAmount`, `feeAmount`, `totalAmount`), calculadas pelo motor de preços (ver seção abaixo).
+Hold vencido vira o estado `EXPIRED` (distinto de `CANCELLED`, que é sempre ação do usuário).
+Idempotência via header `Idempotency-Key` na criação do hold e por estado em
+`checkout`/`confirm-payment` — nenhum gateway de pagamento real é chamado. Racional completo em
+[ADR-0010](docs/architecture/decisions/0010-booking-domain.md).
+
+```bash
+BOOKING=$(curl -s -X POST localhost:3333/cruises/rock-in-sea-classicos-do-rock/cabins/<cabinId>/hold \
+  -H "Authorization: Bearer $TOKEN" | jq -r .id)
+curl -s -X PUT localhost:3333/bookings/$BOOKING/details -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"guests":[{"fullName":"Seu Nome","documentType":"PASSPORT","documentNumber":"AB123456","isPrimary":true}]}'
+curl -s -X POST localhost:3333/bookings/$BOOKING/checkout -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" -d '{"paymentMethod":"PIX"}'
+curl -s -X POST localhost:3333/bookings/$BOOKING/confirm-payment -H "Authorization: Bearer $TOKEN"
+```
+
+## Motor de preços (PricingEngine + CouponPolicy)
+
+Domínio dedicado (`apps/api/src/modules/pricing/domain/`) ao cálculo de preço — nenhuma regra de
+preço/cupom vive em controller. `PricingEngine.calculate` é puro e determinístico: preço da cabine
++ adicionais/experiências selecionados = subtotal; taxa de serviço (5%) + taxa fixa de embarque por
+passageiro (R$50 cada, é como "número de passageiros" entra na conta) somadas ao `feeAmount`;
+desconto do cupom subtraído antes da taxa. Todo o cálculo em `Prisma.Decimal`, arredondado a cada
+passo (nunca `number` do JS) — garante `subtotal - desconto + taxa == total` exatamente, sem fração
+de centavo. Cupom (`Coupon`) com código, percentual ou valor fixo, validade, limite de uso global e
+por usuário, valor mínimo de compra e cruzeiros aplicáveis (`CouponCruise`, many-to-many — lista
+vazia = qualquer cruzeiro). Sete regras de elegibilidade em ordem fixa e testada (`CouponPolicy`):
+cupom inexistente, desativado, expirado, incompatível, valor mínimo não atingido, limite global
+atingido, já utilizado pelo usuário — e válido, quando nenhuma falha. Racional completo em
+[ADR-0011](docs/architecture/decisions/0011-pricing-engine.md).
+
 ## Status
 
 Fase atual: bootstrap do monorepo, camada de persistência, autenticação/autorização, módulo de
-catálogo, frontend público, mapa interativo do navio e motor de disponibilidade de cabine
-concluídos — frontend e backend sobem localmente, banco modelado (28 tabelas) e migrado, seed de
-demonstração funcionando, auth completa (cadastro, login, refresh com rotação, logout, recuperação
-de senha) com RBAC por papel e por posse de recurso, catálogo completo (12 entidades, cruzeiros
-com publish/unpublish/filtros/paginação/ordenação), frontend público (Home, exploração, detalhe,
-mapa do navio) integrado à API real, hold de cabine com garantia real contra concorrência (testada
-com tentativas simultâneas de verdade contra Postgres), health check e documentação de API no ar.
-Checkout (pagamento, hóspedes, emissão de ingresso a partir de uma reserva confirmada) ainda não
-implementado. Ver `docs/DEVLOG.md` para o histórico e `docs/product/BACKLOG.md` para o roadmap
-priorizado.
+catálogo, frontend público, mapa interativo do navio, motor de disponibilidade de cabine, domínio
+de Booking e motor de preços concluídos — frontend e backend sobem localmente, banco modelado (30 tabelas) e
+migrado, seed de demonstração funcionando, auth completa (cadastro, login, refresh com rotação,
+logout, recuperação de senha) com RBAC por papel e por posse de recurso, catálogo completo (12
+entidades, cruzeiros com publish/unpublish/filtros/paginação/ordenação), frontend público (Home,
+exploração, detalhe, mapa do navio) integrado à API real, hold de cabine com garantia real contra
+concorrência (testada com tentativas simultâneas de verdade contra Postgres), reserva completa
+(hóspedes, adicionais, preço com desconto/taxa, checkout e confirmação de pagamento simulados,
+idempotência testada com corridas reais), health check e documentação de API no ar. Gateway de
+pagamento real, emissão de ingresso digital e notificações continuam fora de escopo. Ver
+`docs/DEVLOG.md` para o histórico e `docs/product/BACKLOG.md` para o roadmap priorizado.

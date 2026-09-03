@@ -503,4 +503,101 @@ escolhida evita overbooking de verdade — a mesma disciplina desta conversa (te
 infraestrutura real, provar em vez de assumir) levou a escrever um teste que dispara concorrência
 de verdade contra o Postgres real, não uma simulação sequencial disfarçada de concorrente.
 
+## 2026-09-03 — Domínio de Booking (hóspedes, adicionais, preço, checkout simulado)
+
+**O quê:** implementado o domínio completo de reserva sobre o motor de hold (ADR-0009): fluxo
+cruzeiro → cabine → hóspedes → adicionais → reserva → checkout → confirmação de pagamento
+simulada. Racional completo em [ADR-0010](architecture/decisions/0010-booking-domain.md).
+
+**Estados:** `HELD` não foi renomeado de novo (já significava o que o pedido chama de `PENDING`);
+ganhou vizinhos novos — `PAYMENT_PENDING` (checkout feito, pagamento simulado pendente) e
+`EXPIRED` como valor de enum de verdade (antes, hold vencido virava `CANCELLED` com motivo em
+texto; agora "o sistema fechou por timeout" é distinguível de "o usuário cancelou" pela própria
+coluna `status`).
+
+**Preço, descontos, taxas, total:** quatro colunas reais (`subtotalAmount`, `discountAmount`,
+`feeAmount`, `totalAmount`), calculadas por uma única função pura
+(`BookingPricingPolicy.computeBreakdown`) reusada em `holdCabin`, `updateDetails` e no próprio
+seed — nunca um número recalculado à mão em dois lugares.
+
+**Hóspedes e adicionais:** `BookingGuestsPolicy` garante exatamente um hóspede titular e nunca
+mais que `maxOccupancy`; nova tabela `BookingExperience(bookingId, experienceId, priceAtBooking)`
+com preço congelado no momento da seleção, imune a mudanças posteriores de preço do catálogo. `PUT
+/bookings/:id/details` substitui hóspedes+adicionais e recalcula o preço numa única chamada.
+
+**Checkout sem gateway real:** reaproveitado o modelo `Payment` que já existia no schema desde uma
+etapa anterior (`simulatedTransactionId`, comentado como "equivalente ao ID do gateway real") —
+sinal de que o plano sempre foi simular. `POST .../checkout` cria o `Payment` simulado
+(`HELD -> PAYMENT_PENDING`); `POST .../confirm-payment` faz o papel do callback do gateway
+inexistente (`PAYMENT_PENDING -> CONFIRMED`). Nenhum gateway real é chamado.
+
+**Idempotência:** três mecanismos, cada um resolvendo um risco diferente — `Idempotency-Key` na
+criação do hold (padrão Stripe, testado com uma corrida de verdade via `Promise.all`); `checkout`
+idempotente por método de pagamento (reenviar o mesmo checkout devolve o estado atual); e
+`confirmPayment` idempotente por estado (retry de callback de gateway já processado não falha, só
+devolve a reserva já `CONFIRMED` — testado com 8 chamadas concorrentes reais em
+`cabin-hold-concurrency.e2e-spec.ts`, provando que não existe efeito colateral duplicado: um único
+`Payment` aprovado ao final).
+
+**Testes:** 3 novas policies unitárias puras (lifecycle/pricing/guests), `bookings.service.spec.ts`
+reescrito com repositório mockado, e um novo `booking-domain.e2e-spec.ts` (13 casos) contra
+Postgres/Redis reais cobrindo o fluxo ponta a ponta, cabine indisponível (manutenção e já
+reservada) nunca virando reserva, posse entre usuários reais (404, não 403) e os dois cenários de
+idempotência. Os arquivos de integração de etapas anteriores (`bookings.e2e-spec.ts`,
+`cabin-hold-concurrency.e2e-spec.ts`) foram atualizados para o novo fluxo de dois passos
+(checkout → confirm-payment) e para o novo status `EXPIRED`. Total: 143 testes unitários e 7
+suítes de integração (52 testes), todos passando contra infraestrutura real.
+
+**Por quê:** o pedido pediu explicitamente para reusar o mecanismo de hold em vez de recriar
+concorrência do zero, para garantir que cabine indisponível nunca vire reserva, e para implementar
+idempotência "onde fizer sentido" — a mesma disciplina desta conversa (nunca simular o que a
+infraestrutura real já resolve, nunca uma solução artificial só pra passar no teste) levou a
+reaproveitar o `Payment` já modelado em vez de inventar um novo mecanismo de checkout, e a apoiar
+toda idempotência no estado que já existe (status/idempotencyKey) em vez de uma tabela de chaves
+processadas separada.
+
+## 2026-09-03 — Motor de preços (PricingEngine + CouponPolicy)
+
+**O quê:** extraído o cálculo de preço para um domínio próprio (`modules/pricing/domain/`,
+`PricingEngine` + `CouponPolicy`), substituindo a antiga `BookingPricingPolicy` (removida, não
+deprecated), e expandido o cupom com valor mínimo, limite por usuário e cruzeiros aplicáveis
+(many-to-many). Racional completo em
+[ADR-0011](architecture/decisions/0011-pricing-engine.md).
+
+**Número de passageiros no preço final:** em vez de reinterpretar `CruiseCabinPricing.price` como
+"preço por pessoa" (mudaria o significado de uma coluna já migrada e testada), criada uma taxa de
+embarque fixa por passageiro (`PricingEngine.PORT_FEE_PER_PASSENGER`, R$50) somada à taxa de
+serviço percentual — aditivo, reversível, e um conceito real de cruzeiro (taxa de porto cobrada por
+pessoa). Verificado ao vivo contra o dev server: hold com 0 hóspedes cobra só 5% de taxa; após
+informar 2 hóspedes, a taxa sobe em R$100 (50 x 2).
+
+**Sete regras de cupom, em ordem fixa** (cupom inexistente → desativado → expirado → incompatível
+→ valor mínimo → limite global → limite por usuário → válido) — a ordem é parte do contrato,
+testada explicitamente. "Cupom já utilizado" (limite por usuário) conta reservas cujo
+`confirmedAt` não é nulo, não o status atual — uma reserva confirmada e depois cancelada continua
+contando como "usada", senão um cupom de primeira compra poderia ser resetado só cancelando e
+refazendo a reserva (mesmo princípio que já valia para o limite global desde ADR-0010).
+
+**"Cruzeiros aplicáveis" virou tabela, não coluna:** nova `CouponCruise` (many-to-many, mesmo
+padrão de `BookingExperience`) substitui o antigo `Coupon.cruiseId` singular — um cupom agora pode
+valer para vários cruzeiros específicos, não só "um" ou "todos". Migration com backfill: cupom que
+já tinha um `cruiseId` vira uma linha na tabela nova antes da coluna antiga ser derrubada.
+
+**Precisão monetária:** todo o cálculo usa `Prisma.Decimal` (nunca `number`, testado explicitamente
+contra o clássico `0.1 + 0.2 !== 0.3`), com arredondamento para 2 casas em cada valor no momento em
+que é produzido — garante `subtotal - desconto + taxa == total` exatamente, sem fração de centavo
+escondida, provado com casos que gerariam 3+ casas decimais sem o arredondamento.
+
+**Testes:** `pricing-engine.spec.ts` (precisão, determinismo, clamps defensivos, escala por
+passageiro) e `coupon.policy.spec.ts` (as sete regras, bordas de cada limite, ordem de precedência)
+— totalmente unitários, sem banco. `booking-domain.e2e-spec.ts` ganhou 3 novos testes contra
+Postgres real (valor mínimo, cupom incompatível, limite por usuário com dois usuários distintos).
+Total: 172 testes unitários (+29) e 55 testes de integração (+3), todos passando.
+
+**Por quê:** o pedido foi explícito em não colocar regra complexa em controller e em criar um
+domínio/serviço dedicado — a mesma disciplina desta conversa (nunca duplicar lógica de preço em
+dois lugares, sempre provar contra infraestrutura real) levou a promover o cálculo a um módulo
+próprio em vez de só inchar a policy de Booking, e a escrever um teste que prova a ausência do bug
+de ponto flutuante em vez de só confiar que `Prisma.Decimal` resolve isso sozinho.
+
 <!-- Novas entradas são adicionadas ao final, em ordem cronológica, cada uma com data, "O quê" e "Por quê". -->

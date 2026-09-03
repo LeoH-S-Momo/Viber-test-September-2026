@@ -136,8 +136,9 @@ describe('Catalog discovery (integration)', () => {
       .expect(201);
     freeCabinId = freeCabin.body.id;
 
-    // Sem endpoint publico de checkout ainda (ver bookings.controller.ts) —
-    // criamos a reserva direto via Prisma so pra este fixture de teste.
+    // So precisamos de uma reserva CONFIRMED pra testar a projecao de
+    // disponibilidade no deck-map — sem hospedes/checkout, direto via
+    // Prisma (o fluxo completo de reserva e testado em bookings.e2e-spec.ts).
     const passenger = await prisma.user.findFirstOrThrow({ where: { email: `admin.${label}@example.com` } });
     await prisma.booking.create({
       data: {
@@ -145,6 +146,7 @@ describe('Catalog discovery (integration)', () => {
         cruiseId: cheapCruiseId,
         cabinId: bookedCabinId,
         status: 'CONFIRMED',
+        subtotalAmount: 500,
         totalAmount: 500,
       },
     });

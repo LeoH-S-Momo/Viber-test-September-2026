@@ -1,7 +1,14 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Param, Post, Put } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { RoleKey } from '@prisma/client';
-import { CancelBookingSchema, type CancelBookingInput } from '@seapass/contracts';
+import {
+  CancelBookingSchema,
+  CheckoutBookingSchema,
+  UpdateBookingDetailsSchema,
+  type CancelBookingInput,
+  type CheckoutBookingInput,
+  type UpdateBookingDetailsInput,
+} from '@seapass/contracts';
 import { Public } from '../../../common/decorators/public.decorator';
 import { Roles } from '../../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
@@ -10,10 +17,11 @@ import type { AuthenticatedUser } from '../../auth/types/jwt-payload';
 import { BookingsService } from '../application/bookings.service';
 
 /**
- * Motor de disponibilidade de cabine (ver ADR-0009): consulta publica de
- * disponibilidade, e o ciclo de vida do hold (criar, confirmar, cancelar,
- * liberar) restrito ao passageiro dono da reserva. Emissao de ingresso e
- * pagamento a partir de uma reserva CONFIRMED continuam fora de escopo.
+ * Dominio de Booking (ver ADR-0009 e ADR-0010): consulta publica de
+ * disponibilidade, e o fluxo completo de reserva restrito ao passageiro
+ * dono — criar (hold), editar hospedes/adicionais, consultar, listar,
+ * checkout (pagamento simulado), cancelar, liberar. Gateway de pagamento
+ * real continua fora de escopo (Payment.simulatedTransactionId).
  */
 @ApiTags('bookings')
 @Controller()
@@ -27,6 +35,13 @@ export class BookingsController {
     return this.bookingsService.findMine(user.sub);
   }
 
+  @ApiBearerAuth()
+  @Roles(RoleKey.PASSENGER)
+  @Get('bookings/:id')
+  findOne(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.bookingsService.findById(id, user.sub);
+  }
+
   @Public()
   @Get('cruises/:cruiseSlug/cabins/:cabinId/availability')
   async availability(@Param('cruiseSlug') cruiseSlug: string, @Param('cabinId') cabinId: string) {
@@ -34,6 +49,7 @@ export class BookingsController {
     return { cabinId, availability };
   }
 
+  /** "Seleciona cabine" / criacao da reserva. `Idempotency-Key` opcional — ver ADR-0010. */
   @ApiBearerAuth()
   @Roles(RoleKey.PASSENGER)
   @Post('cruises/:cruiseSlug/cabins/:cabinId/hold')
@@ -41,16 +57,43 @@ export class BookingsController {
     @CurrentUser() user: AuthenticatedUser,
     @Param('cruiseSlug') cruiseSlug: string,
     @Param('cabinId') cabinId: string,
+    @Headers('idempotency-key') idempotencyKey?: string,
   ) {
-    return this.bookingsService.holdCabin(user.sub, cruiseSlug, cabinId);
+    return this.bookingsService.holdCabin(user.sub, cruiseSlug, cabinId, idempotencyKey || undefined);
   }
 
+  /** "Informa passageiros" + "seleciona adicionais" — substitui hospedes/adicionais por completo. */
   @ApiBearerAuth()
   @Roles(RoleKey.PASSENGER)
-  @Post('bookings/:id/confirm')
+  @Put('bookings/:id/details')
+  updateDetails(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(UpdateBookingDetailsSchema)) body: UpdateBookingDetailsInput,
+  ) {
+    return this.bookingsService.updateDetails(id, user.sub, body);
+  }
+
+  /** "Checkout": abre o pagamento simulado. */
+  @ApiBearerAuth()
+  @Roles(RoleKey.PASSENGER)
+  @Post('bookings/:id/checkout')
   @HttpCode(HttpStatus.OK)
-  confirm(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
-    return this.bookingsService.confirmBooking(id, user.sub);
+  checkout(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(CheckoutBookingSchema)) body: CheckoutBookingInput,
+  ) {
+    return this.bookingsService.checkout(id, user.sub, body.paymentMethod);
+  }
+
+  /** Callback (simulado) de gateway de pagamento — confirma a reserva. */
+  @ApiBearerAuth()
+  @Roles(RoleKey.PASSENGER)
+  @Post('bookings/:id/confirm-payment')
+  @HttpCode(HttpStatus.OK)
+  confirmPayment(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.bookingsService.confirmPayment(id, user.sub);
   }
 
   @ApiBearerAuth()

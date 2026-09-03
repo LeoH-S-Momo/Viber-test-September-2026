@@ -204,7 +204,11 @@ describe('Cabin hold lifecycle (integration)', () => {
         .expect(201);
 
       expect(res.body).toMatchObject({ status: 'HELD', cabinId: cabinBId, userId: passengerAId });
-      expect(Number(res.body.totalAmount)).toBe(1500);
+      // preco base 1500 + 5% de taxa de servico (ver BookingPricingPolicy.FEE_RATE, ADR-0010) — sem desconto/adicional ainda.
+      expect(Number(res.body.subtotalAmount)).toBe(1500);
+      expect(Number(res.body.discountAmount)).toBe(0);
+      expect(Number(res.body.feeAmount)).toBeCloseTo(75, 2);
+      expect(Number(res.body.totalAmount)).toBeCloseTo(1575, 2);
       expect(new Date(res.body.holdExpiresAt).getTime()).toBeGreaterThan(Date.now());
 
       await request(server())
@@ -215,16 +219,35 @@ describe('Cabin hold lifecycle (integration)', () => {
     });
   });
 
-  describe('confirmacao, cancelamento e posse', () => {
-    it('confirms a HELD booking and the cabin then reports BOOKED', async () => {
-      const hold = await request(server())
-        .post(`/cruises/${cruiseSlug}/cabins/${cabinBId}/hold`)
-        .set('Authorization', `Bearer ${passengerAToken}`)
-        .send()
-        .expect(201);
+  /** Hold + hospede + checkout — leva a reserva ate PAYMENT_PENDING (fluxo completo em booking-domain.e2e-spec.ts). */
+  async function holdAndCheckout(token: string): Promise<string> {
+    const hold = await request(server())
+      .post(`/cruises/${cruiseSlug}/cabins/${cabinBId}/hold`)
+      .set('Authorization', `Bearer ${token}`)
+      .send()
+      .expect(201);
+
+    await request(server())
+      .put(`/bookings/${hold.body.id}/details`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ guests: [{ fullName: 'Titular Teste', documentType: 'PASSPORT', documentNumber: 'AB123456', isPrimary: true }] })
+      .expect(200);
+
+    await request(server())
+      .post(`/bookings/${hold.body.id}/checkout`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ paymentMethod: 'PIX' })
+      .expect(200);
+
+    return hold.body.id as string;
+  }
+
+  describe('confirmacao de pagamento, cancelamento e posse', () => {
+    it('confirms payment for a PAYMENT_PENDING booking and the cabin then reports BOOKED', async () => {
+      const bookingId = await holdAndCheckout(passengerAToken);
 
       await request(server())
-        .post(`/bookings/${hold.body.id}/confirm`)
+        .post(`/bookings/${bookingId}/confirm-payment`)
         .set('Authorization', `Bearer ${passengerAToken}`)
         .send()
         .expect(200);
@@ -235,13 +258,13 @@ describe('Cabin hold lifecycle (integration)', () => {
       expect(availability.body.availability).toBe('BOOKED');
 
       await request(server())
-        .post(`/bookings/${hold.body.id}/cancel`)
+        .post(`/bookings/${bookingId}/cancel`)
         .set('Authorization', `Bearer ${passengerAToken}`)
         .send({ reason: 'Limpeza pos-teste' })
         .expect(200);
     });
 
-    it('rejects another user confirming/cancelling/releasing someone else\'s booking with 404 (not 403)', async () => {
+    it("rejects another user confirming/cancelling/releasing someone else's booking with 404 (not 403)", async () => {
       const hold = await request(server())
         .post(`/cruises/${cruiseSlug}/cabins/${cabinBId}/hold`)
         .set('Authorization', `Bearer ${passengerAToken}`)
@@ -249,7 +272,7 @@ describe('Cabin hold lifecycle (integration)', () => {
         .expect(201);
 
       await request(server())
-        .post(`/bookings/${hold.body.id}/confirm`)
+        .post(`/bookings/${hold.body.id}/confirm-payment`)
         .set('Authorization', `Bearer ${passengerBToken}`)
         .send()
         .expect(404);
@@ -273,26 +296,22 @@ describe('Cabin hold lifecycle (integration)', () => {
     });
 
     it('rejects releasing an already-CONFIRMED booking, pointing to cancel instead', async () => {
-      const hold = await request(server())
-        .post(`/cruises/${cruiseSlug}/cabins/${cabinBId}/hold`)
-        .set('Authorization', `Bearer ${passengerAToken}`)
-        .send()
-        .expect(201);
+      const bookingId = await holdAndCheckout(passengerAToken);
       await request(server())
-        .post(`/bookings/${hold.body.id}/confirm`)
+        .post(`/bookings/${bookingId}/confirm-payment`)
         .set('Authorization', `Bearer ${passengerAToken}`)
         .send()
         .expect(200);
 
       const release = await request(server())
-        .post(`/bookings/${hold.body.id}/release`)
+        .post(`/bookings/${bookingId}/release`)
         .set('Authorization', `Bearer ${passengerAToken}`)
         .send()
         .expect(409);
       expect(release.body.message).toMatch(/cancelamento/);
 
       await request(server())
-        .post(`/bookings/${hold.body.id}/cancel`)
+        .post(`/bookings/${bookingId}/cancel`)
         .set('Authorization', `Bearer ${passengerAToken}`)
         .send()
         .expect(200);
@@ -300,7 +319,7 @@ describe('Cabin hold lifecycle (integration)', () => {
   });
 
   describe('expiracao', () => {
-    it('closes the cycle: an expired HELD booking lets a new hold succeed, and gets cancelled with a clear reason', async () => {
+    it('closes the cycle: an expired HELD booking becomes EXPIRED (not CANCELLED) and lets a new hold succeed', async () => {
       const hold = await request(server())
         .post(`/cruises/${cruiseSlug}/cabins/${cabinBId}/hold`)
         .set('Authorization', `Bearer ${passengerAToken}`)
@@ -325,7 +344,7 @@ describe('Cabin hold lifecycle (integration)', () => {
         .expect(201);
 
       const oldBooking = await prisma.booking.findUniqueOrThrow({ where: { id: hold.body.id } });
-      expect(oldBooking.status).toBe('CANCELLED');
+      expect(oldBooking.status).toBe('EXPIRED');
       expect(oldBooking.cancellationReason).toMatch(/expirado/);
 
       await request(server())
@@ -335,7 +354,7 @@ describe('Cabin hold lifecycle (integration)', () => {
         .expect(200);
     });
 
-    it('confirming an expired hold is rejected, not silently accepted', async () => {
+    it('checkout is rejected once the hold has expired, not silently accepted', async () => {
       const hold = await request(server())
         .post(`/cruises/${cruiseSlug}/cabins/${cabinBId}/hold`)
         .set('Authorization', `Bearer ${passengerAToken}`)
@@ -347,12 +366,12 @@ describe('Cabin hold lifecycle (integration)', () => {
         data: { holdExpiresAt: new Date(Date.now() - 1000) },
       });
 
-      const confirm = await request(server())
-        .post(`/bookings/${hold.body.id}/confirm`)
+      const checkout = await request(server())
+        .post(`/bookings/${hold.body.id}/checkout`)
         .set('Authorization', `Bearer ${passengerAToken}`)
-        .send()
+        .send({ paymentMethod: 'PIX' })
         .expect(409);
-      expect(confirm.body.message).toMatch(/expirou/);
+      expect(checkout.body.message).toMatch(/expirou/);
     });
   });
 });

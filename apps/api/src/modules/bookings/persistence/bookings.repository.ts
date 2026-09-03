@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { BookingStatus, CabinStatus, Prisma } from '@prisma/client';
+import { BookingStatus, CabinStatus, PaymentMethod, PaymentStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../database/prisma/prisma.service';
+import type { CouponRecord } from '../../pricing/domain/pricing.types';
 
 interface LockedCabin {
   id: string;
@@ -17,12 +18,19 @@ interface LockedBooking {
   holdExpiresAt: Date | null;
 }
 
+/** Estados que hoje bloqueiam a cabine para um cruzeiro — usado tanto pra checar disponibilidade quanto pra expirar. */
+const ACTIVE_BOOKING_STATUSES: BookingStatus[] = [
+  BookingStatus.HELD,
+  BookingStatus.PAYMENT_PENDING,
+  BookingStatus.CONFIRMED,
+];
+
 /**
- * Toda escrita que participa da maquina de estados do hold roda dentro de
- * uma `Prisma.TransactionClient` (`tx`), nunca do client "solto" —
- * `holdCabin`/`confirmBooking`/`cancelBooking`/`releaseHold` em
- * BookingsService abrem a transacao e passam `tx` pra cada chamada aqui.
- * Ver ADR-0009 para o porque disto ser o que garante ausencia de overbooking.
+ * Toda escrita que participa da maquina de estados do hold/checkout roda
+ * dentro de uma `Prisma.TransactionClient` (`tx`), nunca do client "solto"
+ * — `BookingsService` abre a transacao e passa `tx` pra cada chamada aqui.
+ * Ver ADR-0009 (motor de hold) e ADR-0010 (dominio completo de Booking)
+ * para o porque disto ser o que garante ausencia de overbooking/corrida.
  */
 @Injectable()
 export class BookingsRepository {
@@ -34,9 +42,31 @@ export class BookingsRepository {
       orderBy: { createdAt: 'desc' },
       include: {
         cruise: { select: { id: true, title: true, slug: true, embarkationDate: true } },
-        cabin: { select: { id: true, code: true, cabinCategory: { select: { name: true } } } },
+        cabin: { select: { id: true, code: true, cabinCategory: { select: { name: true, maxOccupancy: true } } } },
         guests: true,
+        experiences: { include: { experience: { select: { id: true, title: true } } } },
+        payments: { orderBy: { createdAt: 'desc' } },
       },
+    });
+  }
+
+  findByIdForUser(bookingId: string, userId: string) {
+    return this.prisma.booking.findFirst({
+      where: { id: bookingId, userId },
+      include: {
+        cruise: { select: { id: true, title: true, slug: true, embarkationDate: true } },
+        cabin: { select: { id: true, code: true, cabinCategory: { select: { name: true, maxOccupancy: true } } } },
+        guests: true,
+        experiences: { include: { experience: { select: { id: true, title: true } } } },
+        payments: { orderBy: { createdAt: 'desc' } },
+        coupon: { select: { code: true } },
+      },
+    });
+  }
+
+  findByIdempotencyKey(userId: string, idempotencyKey: string) {
+    return this.prisma.booking.findUnique({
+      where: { userId_idempotencyKey: { userId, idempotencyKey } },
     });
   }
 
@@ -44,10 +74,17 @@ export class BookingsRepository {
     return this.prisma.cabin.findUnique({ where: { id: cabinId }, select: { status: true } });
   }
 
+  findCabinWithCategory(cabinId: string) {
+    return this.prisma.cabin.findUnique({
+      where: { id: cabinId },
+      select: { id: true, cabinCategoryId: true, cabinCategory: { select: { maxOccupancy: true } } },
+    });
+  }
+
   /** Leitura simples (sem lock) — usada so pela consulta de disponibilidade, nunca antes de escrever. */
   findActiveBookingPlain(cabinId: string, cruiseId: string) {
     return this.prisma.booking.findFirst({
-      where: { cabinId, cruiseId, status: { in: [BookingStatus.HELD, BookingStatus.CONFIRMED] } },
+      where: { cabinId, cruiseId, status: { in: ACTIVE_BOOKING_STATUSES } },
       select: { status: true, holdExpiresAt: true },
     });
   }
@@ -58,6 +95,39 @@ export class BookingsRepository {
 
   findCruiseBySlug(slug: string) {
     return this.prisma.cruise.findUnique({ where: { slug }, select: { id: true, status: true } });
+  }
+
+  /** Experiencias (adicionais) que de fato pertencem a este cruzeiro, dentre os ids pedidos. */
+  findExperiencesByIds(cruiseId: string, experienceIds: string[]) {
+    if (experienceIds.length === 0) return Promise.resolve([]);
+    return this.prisma.experience.findMany({
+      where: { id: { in: experienceIds }, cruiseId },
+    });
+  }
+
+  /** Traduz o cupom (persistencia -> forma achatada do dominio) — ver CouponRecord.applicableCruiseIds. */
+  async findCouponByCode(code: string): Promise<CouponRecord | null> {
+    const coupon = await this.prisma.coupon.findUnique({
+      where: { code },
+      include: { applicableCruises: { select: { cruiseId: true } } },
+    });
+    if (!coupon) return null;
+    const { applicableCruises, organizerId: _organizerId, createdAt: _createdAt, updatedAt: _updatedAt, ...rest } = coupon;
+    return { ...rest, applicableCruiseIds: applicableCruises.map((c) => c.cruiseId) };
+  }
+
+  /**
+   * Quantas vezes ESTE usuario ja usou este cupom — conta reservas que JA
+   * FORAM confirmadas em algum momento (`confirmedAt` setado, nunca
+   * limpo — ver confirmPayment/cancelBooking), nao o status ATUAL. Uma
+   * reserva confirmada e depois cancelada continua contando como "usada":
+   * senao um cupom de "primeira compra" poderia ser reaplicado indefinidas
+   * vezes so cancelando e refazendo a reserva. Mesmo evento (confirmacao de
+   * pagamento) que incrementa o `usedCount` global — ver
+   * confirmPayment/incrementCouponUsage.
+   */
+  countUserCouponUsage(tx: Prisma.TransactionClient, userId: string, couponId: string) {
+    return tx.booking.count({ where: { userId, couponId, confirmedAt: { not: null } } });
   }
 
   /**
@@ -74,7 +144,7 @@ export class BookingsRepository {
     return rows[0] ?? null;
   }
 
-  /** Mesmo principio, para as transicoes que operam numa reserva ja existente (confirmar/cancelar/liberar/expirar). */
+  /** Mesmo principio, para as transicoes que operam numa reserva ja existente. */
   async lockBookingForUpdate(tx: Prisma.TransactionClient, bookingId: string): Promise<LockedBooking | null> {
     const rows = await tx.$queryRaw<LockedBooking[]>`
       SELECT id, "userId", "cruiseId", "cabinId", status, "holdExpiresAt"
@@ -84,22 +154,45 @@ export class BookingsRepository {
   }
 
   /**
-   * Expira (cancela) qualquer hold desta cabine+cruzeiro cujo prazo ja
+   * Mesmo principio, pro cupom — trava antes de incrementar usedCount, para
+   * a corrida nao perder um incremento (ver ADR-0010). So o `id`: quem
+   * chama aqui (confirmPayment) ja validou o cupom inteiro em updateDetails,
+   * so precisa confirmar que a linha ainda existe antes de incrementar.
+   */
+  async lockCouponForUpdate(tx: Prisma.TransactionClient, couponId: string): Promise<{ id: string } | null> {
+    const rows = await tx.$queryRaw<{ id: string }[]>`
+      SELECT id FROM coupons WHERE id = ${couponId} FOR UPDATE
+    `;
+    return rows[0] ?? null;
+  }
+
+  incrementCouponUsage(tx: Prisma.TransactionClient, couponId: string) {
+    return tx.coupon.update({ where: { id: couponId }, data: { usedCount: { increment: 1 } } });
+  }
+
+  /**
+   * Expira qualquer hold/checkout desta cabine+cruzeiro cujo prazo ja
    * passou — chamado dentro da mesma transacao/lock de `holdCabin`, antes
    * de checar se ha uma reserva ativa. Sem isto, o indice unico parcial
    * (que so sabe status, nao tempo) bloquearia um novo hold pra sempre
-   * depois que o anterior expirasse sem nunca ser cancelado de fato.
+   * depois que o anterior expirasse sem nunca ser fechado de fato.
+   * Estado final e EXPIRED (nao CANCELLED) — ver ADR-0010.
    */
   expireStaleHold(tx: Prisma.TransactionClient, cabinId: string, cruiseId: string, now: Date) {
     return tx.booking.updateMany({
-      where: { cabinId, cruiseId, status: BookingStatus.HELD, holdExpiresAt: { lte: now } },
-      data: { status: BookingStatus.CANCELLED, cancelledAt: now, cancellationReason: 'Hold expirado automaticamente.' },
+      where: {
+        cabinId,
+        cruiseId,
+        status: { in: [BookingStatus.HELD, BookingStatus.PAYMENT_PENDING] },
+        holdExpiresAt: { lte: now },
+      },
+      data: { status: BookingStatus.EXPIRED, cancelledAt: now, cancellationReason: 'Hold expirado automaticamente.' },
     });
   }
 
   findActiveBooking(tx: Prisma.TransactionClient, cabinId: string, cruiseId: string) {
     return tx.booking.findFirst({
-      where: { cabinId, cruiseId, status: { in: [BookingStatus.HELD, BookingStatus.CONFIRMED] } },
+      where: { cabinId, cruiseId, status: { in: ACTIVE_BOOKING_STATUSES } },
     });
   }
 
@@ -115,9 +208,13 @@ export class BookingsRepository {
       userId: string;
       cruiseId: string;
       cabinId: string;
+      subtotalAmount: Prisma.Decimal;
+      discountAmount: Prisma.Decimal;
+      feeAmount: Prisma.Decimal;
       totalAmount: Prisma.Decimal;
       currency: string;
       holdExpiresAt: Date;
+      idempotencyKey?: string;
     },
   ) {
     return tx.booking.create({ data: { ...data, status: BookingStatus.HELD } });
@@ -125,5 +222,72 @@ export class BookingsRepository {
 
   updateStatus(tx: Prisma.TransactionClient, bookingId: string, data: Prisma.BookingUpdateInput) {
     return tx.booking.update({ where: { id: bookingId }, data });
+  }
+
+  /**
+   * Substitui hospedes e adicionais por completo (semantica de PUT —
+   * idempotente: reenviar a mesma lista produz o mesmo resultado) e grava o
+   * novo preco calculado, tudo atomicamente. So chamado com a reserva ja
+   * travada (`lockBookingForUpdate`) e com status HELD ja validado pelo
+   * chamador (BookingLifecyclePolicy.assertCanEditDetails).
+   */
+  async replaceGuestsAndExperiences(
+    tx: Prisma.TransactionClient,
+    bookingId: string,
+    params: {
+      guests: Array<{
+        fullName: string;
+        documentType: 'PASSPORT' | 'NATIONAL_ID';
+        documentNumber: string;
+        birthDate?: Date;
+        isPrimary: boolean;
+      }>;
+      experiences: Array<{ experienceId: string; priceAtBooking: Prisma.Decimal }>;
+      couponId: string | null;
+      pricing: {
+        subtotalAmount: Prisma.Decimal;
+        discountAmount: Prisma.Decimal;
+        feeAmount: Prisma.Decimal;
+        totalAmount: Prisma.Decimal;
+      };
+    },
+  ) {
+    await tx.bookingGuest.deleteMany({ where: { bookingId } });
+    await tx.bookingExperience.deleteMany({ where: { bookingId } });
+
+    if (params.guests.length > 0) {
+      await tx.bookingGuest.createMany({
+        data: params.guests.map((guest) => ({ ...guest, bookingId })),
+      });
+    }
+    if (params.experiences.length > 0) {
+      await tx.bookingExperience.createMany({
+        data: params.experiences.map((experience) => ({ ...experience, bookingId })),
+      });
+    }
+
+    return tx.booking.update({
+      where: { id: bookingId },
+      data: { couponId: params.couponId, ...params.pricing },
+      include: { guests: true, experiences: true },
+    });
+  }
+
+  createPayment(
+    tx: Prisma.TransactionClient,
+    data: { bookingId: string; method: PaymentMethod; amount: Prisma.Decimal; currency: string; simulatedTransactionId: string },
+  ) {
+    return tx.payment.create({ data: { ...data, status: PaymentStatus.PENDING } });
+  }
+
+  findPendingPayment(tx: Prisma.TransactionClient, bookingId: string) {
+    return tx.payment.findFirst({
+      where: { bookingId, status: PaymentStatus.PENDING },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  approvePayment(tx: Prisma.TransactionClient, paymentId: string, paidAt: Date) {
+    return tx.payment.update({ where: { id: paymentId }, data: { status: PaymentStatus.APPROVED, paidAt } });
   }
 }

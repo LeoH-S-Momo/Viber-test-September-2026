@@ -73,14 +73,21 @@ enum DocumentType {
   NATIONAL_ID
 }
 
-/// HELD = reserva temporaria (hold) enquanto o checkout esta em andamento —
-/// ver CabinHoldPolicy/BookingsService para a maquina de estados completa
-/// (AVAILABLE -> HELD -> CONFIRMED, ou HELD -> CANCELLED por expiracao,
-/// cancelamento ou liberacao).
+/// Maquina de estados do dominio de Booking (ver ADR-0010 e
+/// BookingLifecyclePolicy): HELD (hold da cabine ativo, reserva sendo
+/// montada) -> PAYMENT_PENDING (checkout iniciado, pagamento simulado em
+/// andamento) -> CONFIRMED (pagamento aprovado). EXPIRED e CANCELLED sao os
+/// dois desfechos negativos — distintos de proposito: EXPIRED e sempre
+/// disparado pelo sistema (prazo do hold estourou sem checkout completo),
+/// CANCELLED e sempre uma decisao explicita (do usuario, em qualquer estado
+/// nao-terminal). COMPLETED/REFUNDED seguem reservados para quando a
+/// viagem realmente acontecer / um reembolso pos-pagamento for processado.
 enum BookingStatus {
   HELD
+  PAYMENT_PENDING
   CONFIRMED
   CANCELLED
+  EXPIRED
   COMPLETED
   REFUNDED
 }
@@ -397,7 +404,7 @@ model Cruise {
   events         Event[]
   experiences    Experience[]
   bookings       Booking[]
-  coupons        Coupon[]
+  couponScopes   CouponCruise[]
 
   @@index([organizerId])
   @@index([shipId])
@@ -574,6 +581,8 @@ model Experience {
 
   cruise Cruise @relation(fields: [cruiseId], references: [id], onDelete: Cascade)
 
+  bookings BookingExperience[]
+
   @@index([cruiseId])
   @@map("experiences")
 }
@@ -581,9 +590,10 @@ model Experience {
 // ============================================================================
 // BOOKINGS / GUESTS / PAYMENTS / TICKETS / CHECK-INS / COUPONS
 // ============================================================================
-// O motor de hold/disponibilidade de cabine (AVAILABLE -> HELD -> CONFIRMED)
-// esta implementado — ver ADR-0009. Guests/pagamento/emissao de ingresso a
-// partir de uma reserva CONFIRMED ainda nao (ver docs/product/BACKLOG.md).
+// Dominio completo de Booking implementado — ver ADR-0009 (motor de hold e
+// concorrencia) e ADR-0010 (fluxo de reserva: hospedes, adicionais, preco,
+// checkout simulado). Gateway de pagamento real ainda nao (Payment.
+// simulatedTransactionId ja modela isso desde o inicio, de proposito).
 
 model Booking {
   id                 String        @id @default(cuid())
@@ -592,8 +602,14 @@ model Booking {
   cabinId            String
   couponId           String?
   status             BookingStatus @default(HELD)
+  /// "Preco": cabine (categoria x cruzeiro) + adicionais, antes de desconto/taxa.
+  subtotalAmount     Decimal       @db.Decimal(10, 2)
+  /// "Descontos": cupom aplicado, se houver — sempre calculado (nunca NULL), 0 quando nao ha cupom.
+  discountAmount     Decimal       @default(0) @db.Decimal(10, 2)
+  /// "Taxas": taxa de servico da plataforma — ver BookingPricingPolicy.FEE_RATE.
+  feeAmount          Decimal       @default(0) @db.Decimal(10, 2)
+  /// "Total": subtotalAmount - discountAmount + feeAmount.
   totalAmount        Decimal       @db.Decimal(10, 2)
-  discountAmount     Decimal?      @db.Decimal(10, 2)
   currency           String        @default("BRL")
   /// Bloqueio temporario da cabine durante o checkout — ver ADR-0009
   /// (CabinHoldPolicy/BookingsService). Expirado, a reserva volta para
@@ -603,6 +619,10 @@ model Booking {
   confirmedAt        DateTime?
   cancelledAt        DateTime?
   cancellationReason String?
+  /// Chave de idempotencia opcional (header `Idempotency-Key`), escopada por
+  /// usuario — reenviar a mesma chave devolve a reserva ja criada em vez de
+  /// tentar criar (ou rejeitar) uma segunda. Ver ADR-0010.
+  idempotencyKey     String?
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
 
@@ -612,14 +632,32 @@ model Booking {
   coupon Coupon? @relation(fields: [couponId], references: [id], onDelete: SetNull)
 
   guests        BookingGuest[]
+  experiences   BookingExperience[]
   payments      Payment[]
   notifications Notification[]
 
-  @@index([userId])
+  @@unique([userId, idempotencyKey])
   @@index([cruiseId])
   @@index([cabinId])
   @@index([status])
   @@map("bookings")
+}
+
+/// Adicional (Experience) selecionado numa reserva — preco congelado no
+/// momento da selecao (priceAtBooking), para nao mudar retroativamente se o
+/// preco da Experience for alterado depois.
+model BookingExperience {
+  id             String   @id @default(cuid())
+  bookingId      String
+  experienceId   String
+  priceAtBooking Decimal  @db.Decimal(10, 2)
+  createdAt      DateTime @default(now())
+
+  booking    Booking    @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  experience Experience @relation(fields: [experienceId], references: [id], onDelete: Restrict)
+
+  @@unique([bookingId, experienceId])
+  @@map("booking_experiences")
 }
 
 model BookingGuest {
@@ -695,27 +733,50 @@ model CheckIn {
   @@map("check_ins")
 }
 
+/// Regras de cupom, ver PricingEngine/CouponPolicy (docs/architecture/decisions/0011-pricing-engine.md).
+/// "Cruzeiros aplicaveis" e many-to-many (CouponCruise) em vez de uma unica coluna cruiseId: um
+/// cupom sem nenhuma linha em CouponCruise vale para qualquer cruzeiro do organizador/plataforma
+/// (comportamento equivalente ao antigo `cruiseId: null`); um cupom com 1+ linhas so vale para os
+/// cruzeiros listados.
 model Coupon {
   id            String             @id @default(cuid())
   organizerId   String?
-  cruiseId      String?
   code          String             @unique
   discountType  CouponDiscountType
   discountValue Decimal            @db.Decimal(10, 2)
+  /// Valor minimo do subtotal (cabine + adicionais, antes de desconto/taxa) para o cupom ser aplicavel. Null = sem minimo.
+  minPurchaseAmount Decimal?       @db.Decimal(10, 2)
   maxUses       Int?
   usedCount     Int                @default(0)
+  /// Limite de usos por usuario (ex.: 1 = cupom de "primeira compra"). Null = sem limite por usuario.
+  maxUsesPerUser Int?
   validFrom     DateTime
   validUntil    DateTime
   isActive      Boolean            @default(true)
   createdAt     DateTime           @default(now())
   updatedAt     DateTime           @updatedAt
 
-  organizer Organizer? @relation(fields: [organizerId], references: [id], onDelete: Cascade)
-  cruise    Cruise?    @relation(fields: [cruiseId], references: [id], onDelete: Cascade)
-  bookings  Booking[]
+  organizer         Organizer?     @relation(fields: [organizerId], references: [id], onDelete: Cascade)
+  applicableCruises CouponCruise[]
+  bookings          Booking[]
 
   @@index([organizerId])
   @@map("coupons")
+}
+
+/// Uma linha por cruzeiro ao qual o cupom se aplica — ver comentario em Coupon.
+model CouponCruise {
+  id        String   @id @default(cuid())
+  couponId  String
+  cruiseId  String
+  createdAt DateTime @default(now())
+
+  coupon Coupon @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  cruise Cruise @relation(fields: [cruiseId], references: [id], onDelete: Cascade)
+
+  @@unique([couponId, cruiseId])
+  @@index([cruiseId])
+  @@map("coupon_cruises")
 }
 
 model Notification {
