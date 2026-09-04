@@ -32,12 +32,16 @@ export class TicketsRepository {
             fullName: true,
             booking: {
               select: {
+                id: true,
                 cruise: { select: { title: true, slug: true, embarkationDate: true } },
                 cabin: { select: { code: true, cabinCategory: { select: { name: true } } } },
               },
             },
           },
         },
+        // Ultimo check-in de fato (nao so o status) — "onde/quando fiz check-in", pra
+        // Minha Viagem mostrar ao passageiro, nao so ao staff (ver ADR-0015).
+        checkIns: { orderBy: { checkedInAt: 'desc' }, take: 1, select: { checkedInAt: true, location: true } },
       },
     });
   }

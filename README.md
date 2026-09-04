@@ -292,23 +292,34 @@ curl -s -X POST localhost:3333/bookings/$BOOKING/dining-reservations \
   -d '{"diningSlotId":"'"$SLOT"'","partySize":2,"reservationDate":"2027-10-03"}'
 ```
 
+## Minha Viagem
+
+A tela central do passageiro pós-reserva, em `/reservas`: cruzeiro, navio, cabine, passageiros,
+ingresso digital + QR Code por hóspede, itinerário, eventos/restaurantes/experiências e status de
+check-in — tudo reunido numa **timeline dia a dia** ("Dia 1", "Dia 2"...) construída 100% a partir
+de dado real (embarque, paradas de porto, reservas, check-ins já feitos), nunca um horário
+inventado. Um destaque de "próximo compromisso" no topo responde de cara a "onde eu preciso estar
+agora?". Remover uma atividade reservada é um clique direto na linha da timeline. Racional completo
+em [ADR-0015](docs/architecture/decisions/0015-minha-viagem.md).
+
 ## Status
 
 Fase atual: bootstrap do monorepo, camada de persistência, autenticação/autorização, módulo de
 catálogo, frontend público, mapa interativo do navio, motor de disponibilidade de cabine, domínio
-de Booking, motor de preços, checkout completo, ingresso digital com check-in e experiência interna
-do cruzeiro (eventos/restaurantes) concluídos — frontend e backend sobem localmente, banco modelado
-e migrado, seed de demonstração funcionando, auth completa (cadastro, login, refresh com rotação,
-logout, recuperação de senha) com RBAC por papel e por posse de recurso — agora também com login
-funcional no frontend (`/login`, sessão via refresh silencioso, sem token em storage persistente) —,
-catálogo completo (cruzeiros com publish/unpublish/filtros/paginação/ordenação), frontend público
-(Home, exploração, detalhe, mapa do navio) integrado à API real, hold de cabine com garantia real
-contra concorrência, reserva completa (hóspedes, adicionais, preço com desconto/taxa), checkout via
-`PaymentGateway` simulado (aprovação/recusa/timeout/retry tratados, idempotência testada com
-corridas reais), ingresso digital com QR Code e check-in do Staff por código (uso único garantido
-sob concorrência real, interface dedicada em `/organizador/check-in`), e reserva de eventos/
-restaurantes a bordo com overbooking e conflito de horário impedidos sob concorrência real
-(interface dedicada em `/reservas`, verificada em navegador de verdade), health check e
+de Booking, motor de preços, checkout completo, ingresso digital com check-in, experiência interna
+do cruzeiro (eventos/restaurantes) e a página Minha Viagem concluídos — frontend e backend sobem
+localmente, banco modelado e migrado, seed de demonstração funcionando, auth completa (cadastro,
+login, refresh com rotação, logout, recuperação de senha) com RBAC por papel e por posse de recurso
+— agora também com login funcional no frontend (`/login`, sessão via refresh silencioso, sem token
+em storage persistente) —, catálogo completo (cruzeiros com publish/unpublish/filtros/paginação/
+ordenação), frontend público (Home, exploração, detalhe, mapa do navio) integrado à API real, hold
+de cabine com garantia real contra concorrência, reserva completa (hóspedes, adicionais, preço com
+desconto/taxa), checkout via `PaymentGateway` simulado (aprovação/recusa/timeout/retry tratados,
+idempotência testada com corridas reais), ingresso digital com QR Code e check-in do Staff por
+código (uso único garantido sob concorrência real, interface dedicada em `/organizador/check-in`),
+reserva de eventos/restaurantes a bordo com overbooking e conflito de horário impedidos sob
+concorrência real, e a página Minha Viagem (`/reservas`) reunindo tudo numa timeline dia a dia
+construída só com dado real, verificada em navegador de verdade, health check e
 documentação de API no ar. Gateway de pagamento real (Stripe/Mercado Pago de verdade), leitura de
 QR Code por câmera e notificações continuam fora de escopo. Ver `docs/DEVLOG.md` para o histórico e
 `docs/product/BACKLOG.md` para o roadmap priorizado.

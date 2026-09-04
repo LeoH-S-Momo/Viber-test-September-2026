@@ -1,12 +1,16 @@
 export interface MyTicket {
   id: string;
+  bookingGuestId: string;
   qrCode: string;
   status: 'ISSUED' | 'CHECKED_IN' | 'CANCELLED';
   issuedAt: string;
   qrCodeDataUrl: string;
+  /** So o check-in mais recente (ha no maximo um hoje — reembarque nao esta implementado). */
+  checkIns: Array<{ checkedInAt: string; location: string | null }>;
   bookingGuest: {
     fullName: string;
     booking: {
+      id: string;
       cruise: { title: string; slug: string; embarkationDate: string };
       cabin: { code: string; cabinCategory: { name: string } };
     };

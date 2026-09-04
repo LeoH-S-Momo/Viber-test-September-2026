@@ -776,4 +776,62 @@ concorrência com `Promise.all` real, nunca simular) foi reaplicada aqui, e dest
 armadilha do próprio ambiente de teste (não um bug de aplicação) que só apareceu por insistir em
 concorrência de verdade em vez de aceitar o primeiro `ECONNRESET` como "só flakiness".
 
+## 2026-09-04 — Minha Viagem: a experiência central do passageiro
+
+**O quê:** `/reservas` reconstruída como a tela central do passageiro pós-reserva — cruzeiro, navio,
+cabine, passageiros, ingresso digital + QR Code por hóspede, itinerário, eventos reservados,
+restaurantes, experiências, status de check-in e uma **timeline dia a dia** ("DIA 1 / DIA 2...")
+juntando tudo em ordem cronológica. Racional completo em
+[ADR-0015](architecture/decisions/0015-minha-viagem.md).
+
+**A timeline (`buildTripTimeline`, função pura testada isoladamente) é o núcleo:** monta cada dia a
+partir de dado real — embarque/desembarque (`Cruise.embarkationDate`/`disembarkationDate`), paradas
+de porto (`ItineraryStop.arrivalAt`/`departureAt`, sem horário fabricado quando nenhum dos dois
+existe), eventos e restaurantes reservados, e check-ins JÁ realizados (nunca um horário adivinhado
+para um check-in pendente). `Experience` fica de fora de propósito — o modelo não tem nenhum campo
+de horário, então não há como posicioná-la de verdade num compromisso do dia.
+
+**"Próximo na sua agenda":** o primeiro item da timeline (entre todos os dias) com horário `>= now`,
+em destaque no topo da página — a resposta direta a "onde eu preciso estar?" sem precisar rolar.
+
+**Remover atividades direto na timeline:** cada linha de evento/restaurante ganhou um botão
+"Remover" inline, reaproveitando os endpoints de cancelamento já existentes (ADR-0014); um painel
+"Adicionar ao roteiro" reaproveita os formulários de reserva já construídos. Experiências continuam
+somente leitura (mudar depois de `CONFIRMED` segue fora de escopo, mesma razão do ADR-0014).
+
+**Backend — o que faltava para o passageiro ver seu próprio check-in:** `GET /tickets/me` não tinha
+`Booking.id` (não dava pra correlacionar um ticket com a reserva certa sem casar por nome — frágil)
+nem o horário/local do check-in. Dois campos adicionados ao `select` de `TicketsRepository.findMine`
+(mudança puramente aditiva, nenhum contrato quebrou): `booking.id` e `checkIns` (o mais recente).
+Continua sem uma rota passageiro-facing dedicada — `Ticket.status` + o `checkIns[0]` novo já bastam.
+
+**Arquitetura do frontend:** `apps/web/src/features/trip/` (mesmo padrão de pasta por feature de
+`features/cruise-detail/`) — `trip-hero.tsx`, `trip-timeline-view.tsx`, `trip-tickets.tsx`
+(cartões estilo "boarding pass"), `trip-info.tsx`, `trip-experiences.tsx`,
+`add-activity-forms.tsx`. A página orquestra três fontes em paralelo (`bookings/me`, `tickets/me`,
+depois o catálogo do cruzeiro) e monta a timeline com `useMemo`.
+
+**Verificação:** dados reais semeados via API (itinerário com paradas de porto com e sem horário,
+evento, restaurante, dois hóspedes, um deles com check-in real feito via staff) e um script
+Playwright dirigindo um Chromium real: página completa com timeline de 4 dias, cabeçalho com
+próximo compromisso, dois cartões de ingresso (um check-in feito com QR Code, outro pendente),
+informações importantes com os documentos reais de cada hóspede, e remoção de uma reserva de
+restaurante refletida imediatamente na timeline. Um efeito colateral instrutivo do teste: um
+check-in forçado via API antes do dia de embarque (só para acelerar o teste) produziu um "Dia -1"
+na timeline — matematicamente correto (a função não trava o número do dia em 1), deixado como está
+de propósito, para não mascarar um dado real mesmo quando incomum.
+
+**Testes:** `tests/unit/trip-timeline.test.ts` (Vitest, 9 casos — agrupamento por dia, ordenação
+cronológica, combinação de data+hora de restaurante, parada de porto com/sem horário, check-in real
+sem horário fabricado, reservas canceladas excluídas, `nextUp` ignorando itens passados). Extensão
+de `check-in.e2e-spec.ts` com 2 testes novos confirmando os campos novos de `GET /tickets/me`. Total
+API: 248 testes unitários e 85 de integração (+1). Frontend: 30 testes unitários Vitest (+9).
+
+**Por quê:** o pedido foi explícito em criar uma experiência "parecida com um aplicativo de viagem"
+que responda rapidamente "onde eu preciso estar e o que tenho para fazer" — uma timeline dia a dia
+construída 100% a partir de dado real (nunca um horário inventado, mesmo quando isso significa
+mostrar "horário a confirmar" em vez de preencher um campo) é o que torna essa resposta confiável, e
+a disciplina desta conversa de sempre verificar em navegador de verdade foi o que revelou o caso de
+borda do "Dia -1" antes de qualquer usuário real ver algo pior que isso.
+
 <!-- Novas entradas são adicionadas ao final, em ordem cronológica, cada uma com data, "O quê" e "Por quê". -->

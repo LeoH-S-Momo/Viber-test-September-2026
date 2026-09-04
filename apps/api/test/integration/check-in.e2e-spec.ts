@@ -173,6 +173,28 @@ describe('Digital ticket + check-in (integration)', () => {
     expect(ticket.bookingGuest.booking.cruise.title).toContain('Cruzeiro');
     expect(ticket.bookingGuest.booking.cabin.code).toBeDefined();
     expect(ticket.qrCodeDataUrl).toMatch(/^data:image\/png;base64,/);
+    // Necessario pro frontend correlacionar um ticket com a reserva/timeline de Minha Viagem
+    // (ver ADR-0015) sem depender de casar nome de hospede.
+    expect(ticket.bookingGuestId).toBeDefined();
+    expect(ticket.bookingGuest.booking.id).toBeDefined();
+    expect(ticket.checkIns).toEqual([]);
+  });
+
+  it('GET /tickets/me expoe o horario e local do check-in mais recente, apos um check-in real', async () => {
+    const code = await confirmBookingAndGetTicketCode('Ticket Com CheckIn', 'TK000009');
+
+    await request(server())
+      .post('/check-in/confirm')
+      .set(staffAuth)
+      .send({ code, location: 'Portão B' })
+      .expect(200);
+
+    const mine = await request(server()).get('/tickets/me').set('Authorization', `Bearer ${passengerToken}`).expect(200);
+    const ticket = mine.body.find((t: { qrCode: string }) => t.qrCode === code);
+    expect(ticket.status).toBe('CHECKED_IN');
+    expect(ticket.checkIns).toHaveLength(1);
+    expect(ticket.checkIns[0].location).toBe('Portão B');
+    expect(new Date(ticket.checkIns[0].checkedInAt).getTime()).not.toBeNaN();
   });
 
   it('fluxo completo: lookup mostra NOT_CHECKED_IN, confirma o check-in, e uma segunda tentativa e ALREADY_USED', async () => {
