@@ -8,6 +8,17 @@ import { useAuth } from '@/lib/auth-context';
 export function AuthNav() {
   const { user, isLoading, logout } = useAuth();
 
+  async function handleLogout() {
+    await logout();
+    // Recarregamento completo, nao `router.push` — numa pagina protegida por
+    // `<RequireRole>`, o efeito dela tambem reage a `user` virar null e
+    // redireciona pra `/login`, brigando com uma navegacao client-side pra
+    // `/` (o efeito sempre venceu nos testes, nao importa a ordem). Um
+    // reload garante a tela inicial de verdade, e ja limpa qualquer estado
+    // client remanescente da sessao anterior de quebra.
+    window.location.href = '/';
+  }
+
   if (isLoading) {
     return <span className="h-9 w-20" aria-hidden="true" />;
   }
@@ -57,9 +68,15 @@ export function AuthNav() {
           {isStaffOnly ? 'Check-in' : 'Meus ingressos'}
         </Link>
       )}
+      <span
+        className="hidden max-w-[12rem] truncate text-sm text-slate-500 sm:inline"
+        title={user.email}
+      >
+        {user.email}
+      </span>
       <button
         type="button"
-        onClick={() => logout()}
+        onClick={handleLogout}
         className="flex items-center gap-1.5 rounded-full px-3 py-2 text-sm font-medium text-slate-500 transition hover:bg-slate-100 sm:px-4"
       >
         <LogOut className="h-4 w-4" aria-hidden="true" />

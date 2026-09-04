@@ -920,4 +920,32 @@ e em criar testes para autorização multi-tenant — a mesma disciplina desta c
 numa leitura solta seguida de filtro, sempre embutir a condição de posse na própria consulta) foi
 reaplicada aqui, agora provada com dois organizadores reais e não só um.
 
+## 2026-09-04 — Logout volta pra tela inicial, e-mail no header, nova paleta de cores
+
+**Logout redireciona pra home:** o botão "Sair" só limpava a sessão, sem navegar — numa página
+protegida (`<RequireRole>`), isso deixava o usuário preso na tela de "Redirecionando…". Corrigido
+com um recarregamento completo (`window.location.href = '/'`) em vez de `router.push` — o efeito
+de `RequireRole` (que também reage a `user` virar `null` e chama `router.replace('/login')`) sempre
+venceu uma navegação client-side concorrente nos testes, não importa a ordem ou um `setTimeout(0)`
+entre as duas chamadas; só um reload de verdade resolveu de forma confiável.
+
+**E-mail do usuário logado no header:** adicionado entre os links de navegação e o botão "Sair"
+(`apps/web/src/components/auth-nav.tsx`), visível a partir de telas ≥640px.
+
+**Nova paleta de cores — "céu e mar":** trocada a paleta inteira do site pela publicada em
+[colorhunt.co/palette/30afff92eeffd8ffc5c4f7ca](https://colorhunt.co/palette/30afff92eeffd8ffc5c4f7ca)
+(pedido explícito do usuário). Os dois degradês de token (`brand`/azul, `accent`/verde, 10-11 tons
+cada) foram regerados por HSL a partir das 4 cores da paleta — `brand-500` é literalmente `#30AFFF`,
+`accent-100`/`200` ficam próximos de `#D8FFC5`/`#C4F7CA` — com contraste WCAG AA verificado
+(`accent-600`, usado em todo botão "primary", passou de 3.39:1 pra 4.79:1 depois de três ajustes de
+luminosidade). Só `apps/web/src/app/globals.css` mudou — nenhum componente hardcodeia hex da
+paleta antiga. Racional completo, incluindo a tabela de contraste, em
+[ADR-0017](architecture/decisions/0017-color-palette.md).
+
+**Por quê:** pedidos diretos de UX/marca — a mesma disciplina de sempre verificar em navegador real
+(não só confiar no código) foi o que revelou que a correção óbvia do logout (`router.push` depois
+de `logout()`) simplesmente não funcionava, e o que confirmou visualmente que a nova paleta ficou
+coerente em todas as áreas do site (pública, passageiro, organizador) antes de considerar o pedido
+atendido.
+
 <!-- Novas entradas são adicionadas ao final, em ordem cronológica, cada uma com data, "O quê" e "Por quê". -->
