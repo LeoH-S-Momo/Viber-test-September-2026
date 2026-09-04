@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { Container } from '@/components/ui/container';
 import { ErrorState } from '@/components/ui/error-state';
+import { CabinBookingFlow } from '@/features/booking/cabin-booking-flow';
 import { CruiseCabins } from '@/features/cruise-detail/cruise-cabins';
 import { CruiseEvents } from '@/features/cruise-detail/cruise-events';
 import { CruiseExperiences } from '@/features/cruise-detail/cruise-experiences';
@@ -10,7 +11,6 @@ import { CruiseItinerary } from '@/features/cruise-detail/cruise-itinerary';
 import { CruiseOverview } from '@/features/cruise-detail/cruise-overview';
 import { CruiseRestaurants } from '@/features/cruise-detail/cruise-restaurants';
 import { CruiseVenues } from '@/features/cruise-detail/cruise-venues';
-import { ShipMap } from '@/features/ship-map/ship-map';
 import { getCruiseBySlug } from '@/services/cruises.service';
 import { getCruiseDeckMap } from '@/services/ship-map.service';
 
@@ -57,7 +57,7 @@ export default async function CruiseDetailPage({ params }: { params: Params }) {
         <CruiseOverview cruise={cruise} />
 
         {deckMapResult.ok ? (
-          <ShipMap decks={deckMapResult.data ?? []} />
+          <CabinBookingFlow cruiseSlug={slug} decks={deckMapResult.data ?? []} />
         ) : (
           <ErrorState title="Não foi possível carregar o mapa do navio" message={deckMapResult.message} />
         )}

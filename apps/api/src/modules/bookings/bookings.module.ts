@@ -26,7 +26,14 @@ import { BookingsRepository } from './persistence/bookings.repository';
  */
 @Module({
   imports: [
-    BullModule.registerQueue({ name: CABIN_HOLD_EXPIRATION_QUEUE }, { name: TICKET_ISSUANCE_QUEUE }),
+    BullModule.registerQueue(
+      { name: CABIN_HOLD_EXPIRATION_QUEUE, defaultJobOptions: { attempts: 5, backoff: { type: 'exponential', delay: 2000 } } },
+      // Retry importa MUITO mais aqui (ver ADR-0020): sem isto, um blip do Redis no exato
+      // momento em que um pagamento e aprovado significa uma reserva CONFIRMED que nunca
+      // ganha ticket, descobrivel so vasculhando log manualmente — ver
+      // TicketIssuanceProcessor.onJobFailed.
+      { name: TICKET_ISSUANCE_QUEUE, defaultJobOptions: { attempts: 5, backoff: { type: 'exponential', delay: 2000 } } },
+    ),
     PaymentsModule,
     TicketsModule,
   ],

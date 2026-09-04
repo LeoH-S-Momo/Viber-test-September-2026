@@ -1,5 +1,6 @@
 import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { RoleKey } from '@prisma/client';
 import {
   ConfirmCheckInSchema,
@@ -28,7 +29,12 @@ import { TicketsService } from '../application/tickets.service';
 export class CheckInController {
   constructor(private readonly ticketsService: TicketsService) {}
 
+  // Limite generoso (nao o mesmo piso apertado de login/registro, ver ADR-0020) — embarque de
+  // verdade envolve o staff escaneando MUITOS tickets por minuto de proposito; o limite aqui e
+  // so pra conter brute-force de codigo (o codigo em si ja e aleatorio/seguro, ver
+  // generateSecureTicketCode), nao pra restringir o uso legitimo da tela de check-in.
   @Roles(RoleKey.ORGANIZER_STAFF, RoleKey.ORGANIZER_ADMIN)
+  @Throttle({ default: { limit: 120, ttl: 60_000 } })
   @Post('lookup')
   @HttpCode(HttpStatus.OK)
   lookup(
@@ -40,6 +46,7 @@ export class CheckInController {
   }
 
   @Roles(RoleKey.ORGANIZER_STAFF, RoleKey.ORGANIZER_ADMIN)
+  @Throttle({ default: { limit: 120, ttl: 60_000 } })
   @Post('confirm')
   @HttpCode(HttpStatus.OK)
   confirm(

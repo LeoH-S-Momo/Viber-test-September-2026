@@ -9,6 +9,7 @@ function coupon(overrides: Partial<CouponRecord> = {}): CouponRecord {
   return {
     id: 'coupon-1',
     code: 'TESTE10',
+    organizerId: null, // null = global (qualquer organizador) — ver regra de hardening abaixo
     discountType: CouponDiscountType.PERCENTAGE,
     discountValue: new Prisma.Decimal(10),
     minPurchaseAmount: null,
@@ -26,6 +27,7 @@ function coupon(overrides: Partial<CouponRecord> = {}): CouponRecord {
 function context(overrides: Partial<CouponValidationContext> = {}): CouponValidationContext {
   return {
     cruiseId: 'cruise-1',
+    cruiseOrganizerId: 'organizer-1',
     subtotalAmount: new Prisma.Decimal(1000),
     userUsageCount: 0,
     now: NOW,
@@ -72,6 +74,25 @@ describe('CouponPolicy', () => {
     it('aceita exatamente no instante de validUntil (limite inclusivo)', () => {
       const c = coupon({ validUntil: NOW });
       expect(() => CouponPolicy.validate(c, context())).not.toThrow();
+    });
+  });
+
+  describe('regra de hardening (ADR-0020) — cupom escopado a organizador', () => {
+    it('aceita um cupom global (organizerId null) pra qualquer organizador', () => {
+      const c = coupon({ organizerId: null });
+      expect(() => CouponPolicy.validate(c, context({ cruiseOrganizerId: 'organizer-qualquer' }))).not.toThrow();
+    });
+
+    it('aceita quando o cupom pertence ao MESMO organizador do cruzeiro', () => {
+      const c = coupon({ organizerId: 'organizer-1' });
+      expect(() => CouponPolicy.validate(c, context({ cruiseOrganizerId: 'organizer-1' }))).not.toThrow();
+    });
+
+    it('rejeita um cupom de um organizador redimido num cruzeiro de OUTRO organizador', () => {
+      const c = coupon({ organizerId: 'organizer-a' });
+      expect(() => CouponPolicy.validate(c, context({ cruiseOrganizerId: 'organizer-b' }))).toThrow(
+        /nao e valido para este cruzeiro/,
+      );
     });
   });
 

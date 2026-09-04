@@ -126,14 +126,25 @@ enum NotificationType {
   BOOKING_CONFIRMED
   PAYMENT_APPROVED
   PAYMENT_DECLINED
+  TICKET_AVAILABLE
   ITINERARY_CHANGED
   CHECKIN_REMINDER
+  BOOKING_CANCELLED
   GENERIC
 }
 
 enum NotificationChannel {
   EMAIL
   IN_APP
+}
+
+/// Estado de ENTREGA da notificacao (o envio de verdade pelo NotificationEmailProcessor via
+/// BullMQ) — distinto de `readAt`, que e sobre o usuario ter VISTO a notificacao, nao sobre ela
+/// ter sido enviada com sucesso (ver docs/architecture/decisions/0019-events-and-notifications.md).
+enum NotificationDeliveryStatus {
+  PENDING
+  SENT
+  FAILED
 }
 
 // ============================================================================
@@ -867,8 +878,18 @@ model Notification {
   channel   NotificationChannel @default(IN_APP)
   title     String
   message   String
+  /// Versao HTML ja renderizada (ver notification-templates.ts) — gerada uma vez na criacao,
+  /// nao recalculada no envio, pra o e-mail de verdade bater com o que fica auditavel aqui.
+  htmlBody  String?
   readAt    DateTime?
   createdAt DateTime            @default(now())
+
+  /// Os 3 campos abaixo so tem sentido pra `channel: EMAIL` (ver
+  /// NotificationEmailProcessor) — ficam PENDING/null pra `channel: IN_APP`, que nao passa
+  /// pela fila (so a linha em si ja "e" a notificacao in-app).
+  deliveryStatus NotificationDeliveryStatus @default(PENDING)
+  deliveryError  String?
+  sentAt         DateTime?
 
   user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   booking Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)

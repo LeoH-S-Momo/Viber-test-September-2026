@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test';
 
-const SHIP_MAP_SLUG = 'rock-in-sea-classicos-do-rock';
+// Cruzeiro de demonstração renomeado em 2026-09-04 (ver docs/DEVLOG.md) — mantém o slug do
+// seed atual (`apps/api/src/database/prisma/seed.ts`) em sincronia com este teste.
+const SHIP_MAP_SLUG = 'heavy-metal-do-leo-sensations';
 
 test('ship map lets the visitor switch decks and inspect a cabin', async ({ page }) => {
   await page.goto(`/cruzeiros/${SHIP_MAP_SLUG}`);

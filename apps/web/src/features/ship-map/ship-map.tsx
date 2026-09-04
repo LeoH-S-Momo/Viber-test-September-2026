@@ -58,7 +58,7 @@ export function ShipMap({
   }
 
   return (
-    <div>
+    <div id="mapa-do-navio" className="scroll-mt-20">
       <SectionHeading
         eyebrow="A bordo"
         title="Mapa do navio"

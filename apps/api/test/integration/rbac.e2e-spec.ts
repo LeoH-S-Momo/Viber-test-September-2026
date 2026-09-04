@@ -245,4 +245,124 @@ describe('RBAC (integration)', () => {
       .expect(200);
     expect(approved.body.status).toBe('APPROVED');
   });
+
+  it('an organizer cannot create/edit Artist (shared reference data) — only PLATFORM_ADMIN can (hardening, ver ADR-0020)', async () => {
+    const org = await registerOrganizer('artistguard');
+    const adminEmail = `admin.${unique('platform')}@example.com`;
+    const passwordHash = await usersService.hashPassword('SenhaForte123');
+    await usersService.createUserWithRole({
+      email: adminEmail,
+      passwordHash,
+      fullName: 'Platform Admin de Teste',
+      roleKey: RoleKey.PLATFORM_ADMIN,
+    });
+    const admin = await request(server())
+      .post('/auth/login')
+      .send({ email: adminEmail, password: 'SenhaForte123' })
+      .expect(200);
+
+    await request(server())
+      .post('/artists')
+      .set('Authorization', `Bearer ${org.accessToken}`)
+      .send({ name: `Artista ${unique('org')}` })
+      .expect(403);
+
+    const created = await request(server())
+      .post('/artists')
+      .set('Authorization', `Bearer ${admin.body.accessToken}`)
+      .send({ name: `Artista ${unique('admin')}` })
+      .expect(201);
+
+    await request(server())
+      .patch(`/artists/${created.body.id}`)
+      .set('Authorization', `Bearer ${org.accessToken}`)
+      .send({ name: 'Sequestrado' })
+      .expect(403);
+  });
+
+  it('a coupon scoped to one organizer cannot be redeemed on another organizer cruise (hardening, ver ADR-0020)', async () => {
+    const orgA = await registerOrganizer('couponowner');
+    const orgB = await registerOrganizer('couponvictim');
+
+    const port = await prisma.port.create({ data: { name: `Porto ${unique('port')}`, country: 'Brasil' } });
+
+    async function buildPublishedCruise(orgAuth: string, label: string) {
+      const ship = await request(server())
+        .post('/ships')
+        .set('Authorization', `Bearer ${orgAuth}`)
+        .send({ name: `Navio ${label}`, passengerCapacity: 200 })
+        .expect(201);
+      const category = await request(server())
+        .post(`/ships/${ship.body.id}/cabin-categories`)
+        .set('Authorization', `Bearer ${orgAuth}`)
+        .send({ name: 'Interna', maxOccupancy: 2 })
+        .expect(201);
+      const deck = await request(server())
+        .post(`/ships/${ship.body.id}/decks`)
+        .set('Authorization', `Bearer ${orgAuth}`)
+        .send({ number: 1, name: `Deck ${label}` })
+        .expect(201);
+      const cabin = await request(server())
+        .post(`/decks/${deck.body.id}/cabins`)
+        .set('Authorization', `Bearer ${orgAuth}`)
+        .send({ cabinCategoryId: category.body.id, code: 'CP01' })
+        .expect(201);
+      const cruise = await request(server())
+        .post('/cruises')
+        .set('Authorization', `Bearer ${orgAuth}`)
+        .send({
+          shipId: ship.body.id,
+          title: `Cruzeiro ${label}`,
+          theme: 'Teste',
+          embarkationDate: '2027-08-01T12:00:00Z',
+          disembarkationDate: '2027-08-05T12:00:00Z',
+          embarkationPortId: port.id,
+          disembarkationPortId: port.id,
+        })
+        .expect(201);
+      await request(server())
+        .post(`/cruises/${cruise.body.id}/itinerary-stops`)
+        .set('Authorization', `Bearer ${orgAuth}`)
+        .send({ portId: port.id, dayNumber: 1, isEmbarkation: true })
+        .expect(201);
+      await request(server())
+        .post(`/cruises/${cruise.body.id}/pricing`)
+        .set('Authorization', `Bearer ${orgAuth}`)
+        .send({ cabinCategoryId: category.body.id, price: 2000 })
+        .expect(201);
+      await request(server()).post(`/cruises/${cruise.body.id}/publish`).set('Authorization', `Bearer ${orgAuth}`).expect(200);
+      return { slug: cruise.body.slug as string, cabinId: cabin.body.id as string };
+    }
+
+    const cruiseB = await buildPublishedCruise(orgB.accessToken, unique('cruiseb'));
+
+    // Cupom criado escopado ao Organizador A — nao tem nenhuma relacao com o cruzeiro do B.
+    const coupon = await prisma.coupon.create({
+      data: {
+        code: unique('CROSSORG').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 20),
+        organizerId: orgA.organizerId,
+        discountType: 'PERCENTAGE',
+        discountValue: 50,
+        validFrom: new Date('2020-01-01'),
+        validUntil: new Date('2030-01-01'),
+        isActive: true,
+      },
+    });
+
+    const passenger = await registerPassenger();
+    const hold = await request(server())
+      .post(`/cruises/${cruiseB.slug}/cabins/${cruiseB.cabinId}/hold`)
+      .set('Authorization', `Bearer ${passenger.accessToken}`)
+      .expect(201);
+
+    await request(server())
+      .put(`/bookings/${hold.body.id}/details`)
+      .set('Authorization', `Bearer ${passenger.accessToken}`)
+      .send({
+        guests: [{ fullName: 'Passageiro Cupom', documentType: 'PASSPORT', documentNumber: unique('DOC'), isPrimary: true }],
+        experienceIds: [],
+        couponCode: coupon.code,
+      })
+      .expect(409); // ConflictException — "Este cupom nao e valido para este cruzeiro."
+  });
 });

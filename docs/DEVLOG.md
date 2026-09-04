@@ -1060,4 +1060,141 @@ dos dois critérios pedidos (nem "Navio de teste", nem título com número), emb
 teste também (organizador "Organizer portalcheck1788520121639") — vale confirmar com o usuário se
 deve sair numa próxima limpeza.
 
+## 2026-09-04 — Eventos de domínio/aplicação + infraestrutura de notificações
+
+**O quê:** implementada a infraestrutura completa de eventos e notificações pedida explicitamente
+pelo usuário. Duas camadas, com propósitos deliberadamente diferentes (ver
+[ADR-0019](architecture/decisions/0019-events-and-notifications.md)):
+
+- **Eventos de domínio** (`EventEmitter2`, síncrono, in-process, `src/domain-events/`): 9 eventos —
+  os 8 do pedido (`BOOKING_CREATED`, `BOOKING_CONFIRMED`, `BOOKING_CANCELLED`, `PAYMENT_APPROVED`,
+  `PAYMENT_FAILED`, `TICKET_GENERATED`, `CHECKIN_COMPLETED`, `EVENT_BOOKED`) mais `EVENT_UPDATED`
+  (novo, necessário pra "alteração de evento" ter de onde nascer). Emitidos por `BookingsService`,
+  `TicketsService`, `ActivitiesService`, `EventsService` (catálogo) e `AdminSalesService` — nenhum
+  deles sabe que `NotificationsModule` existe.
+- **Fila de notificações** (`BullMQ`, `NotificationsModule`, auto-contido): traduz os eventos que
+  viram notificação (nem todos viram — `BOOKING_CREATED`/`CHECKIN_COMPLETED`/`EVENT_BOOKED` ficam
+  sem e-mail hoje, de propósito) nas 7 notificações pedidas: confirmação de reserva, pagamento
+  aprovado, pagamento recusado, ticket disponível, lembrete de embarque, alteração de evento,
+  cancelamento. Cada uma grava uma linha `Notification` (auditável, consultável via
+  `GET /notifications/me`) e só então enfileira o envio do e-mail de verdade.
+
+**Retry, idempotência, dead-letter:** fila `notifications` com `attempts: 5` + backoff exponencial
+(3s→48s); idempotência em duas camadas (jobId determinístico + checagem de `deliveryStatus` antes
+de reenviar — e o mesmo princípio replicado em `TicketsService.issueTicketsForBooking`, que só
+dispara `TICKET_GENERATED` se o número de tickets já emitidos antes da chamada for menor que o de
+hóspedes, pra um retry do BullMQ não reenviar "seu ingresso está pronto" à toa); quando as 5
+tentativas se esgotam, o job cai numa fila `notifications-dead-letter` separada (visível via
+Redis/BullMQ) + a `Notification` vira `FAILED` + um `AuditLog`.
+
+**Pagamento recusado vs. cancelamento — deliberadamente 2 notificações separadas, nunca as duas
+juntas:** quando um pagamento é recusado, o sistema já cancela a reserva automaticamente (libera a
+cabine) — mas emitir `BOOKING_CANCELLED` ali mandaria um segundo e-mail redundante/confuso logo
+depois de "pagamento recusado". `BOOKING_CANCELLED` fica reservado só pro cancelamento explícito
+(passageiro ou admin). Verificado na prática (ver testes abaixo): o cenário de recusa gera só
+`PAYMENT_DECLINED`, nunca os dois juntos.
+
+**Lembrete de embarque** é o único gatilho por TEMPO, não por evento — reusa o mesmo padrão de job
+BullMQ atrasado que `CABIN_HOLD_EXPIRATION_QUEUE` já usava (ADR-0009), agendado quando
+`BOOKING_CONFIRMED` dispara, e reconfirmando que a reserva ainda está `CONFIRMED` quando o delay
+vence antes de gerar a notificação (a reserva pode ter sido cancelada nesse meio-tempo).
+
+**MailHog em dev:** binário Windows portátil (`C:\Users\Leo\mailhog\MailHog.exe`, sem instalador —
+mesma razão de não usar `winget` que motivou o Redis portátil nesta máquina, ver skill de infra),
+SMTP `:1025`, UI web `http://localhost:8025`. Diferente de Postgres/Redis, não virou serviço
+Windows — não guarda nada que precise sobreviver a um reboot, então um processo em segundo plano
+reiniciado por sessão é suficiente (documentado em
+`.claude/skills/seapass-local-infra/SKILL.md`, seção 1b, nova). Em CI, `mailhog/mailhog` foi
+adicionado como serviço Docker em `infra/docker-compose.test.yml` (portas 1026/8026, offset do
+padrão pelo mesmo motivo que Postgres/Redis de teste já usavam portas diferentes — não conflitar
+com uma instância local rodando em paralelo).
+
+**Testado contra infraestrutura real, não mockada:** `test/integration/notifications.e2e-spec.ts`
+(4 casos) roda o fluxo completo — registro, hold, checkout — e depois consulta a própria API REST
+do MailHog (`GET /api/v2/messages`) pra confirmar que o e-mail chegou de verdade, não só que o job
+rodou sem lançar erro; cobre o caminho feliz (3 notificações da reserva confirmada com PIX),
+pagamento recusado, cancelamento explícito, e a paginação/autenticação de `GET /notifications/me`.
+Mais 9 testes unitários novos pro `NotificationsProcessor` (idempotência, dead-letter, job
+desconhecido). Suíte completa: 257 unitários + 135 integração, todos verdes.
+
+**O que ficou síncrono e o que ficou assíncrono, e por quê** (pedido explícito do usuário — ver a
+seção dedicada da ADR): a emissão do evento em si e a gravação da linha `Notification` continuam
+síncronas (chamada de função em memória + um insert local no mesmo Postgres da request — não valia
+a pena adiar algo tão barato); só o ENVIO do e-mail (I/O de rede pra um SMTP externo, que pode ser
+lento ou falhar) vai pra fila. Continuam também síncronos todos os fluxos que já eram antes desta
+mudança (validação, `PaymentGateway.charge()` — o usuário ainda precisa saber na hora se o cartão
+foi aprovado).
+
+**Por quê:** pedido explícito e detalhado do usuário, incluindo a instrução direta de não
+transformar tudo em assíncrono sem necessidade e de explicar a divisão — daí o cuidado extra em
+justificar cada escolha síncrono/assíncrono na ADR em vez de só implementar.
+
+## 2026-09-04 — Hardening completo: segurança, backend, frontend, testes, DevOps
+
+**O quê:** revisão completa do SeaPass "como se fosse um projeto prestes a ser avaliado por uma
+equipe profissional", pedida explicitamente pelo usuário, cobrindo segurança, backend, frontend,
+testes e DevOps — com instrução de corrigir, não só listar. Detalhe completo em
+[ADR-0020](architecture/decisions/0020-hardening.md); resumo aqui.
+
+**Segurança (corrigido):** cupom redimível em cruzeiro de outro organizador (Alto — escopo de
+`organizerId` era descartado antes mesmo de chegar na política de validação); `Artist` (dado de
+referência compartilhado entre organizadores) editável por qualquer organizador, sem checagem de
+posse (Médio); JWT/cookie de sessão gravados em texto puro em todo log (Crítico — o redact
+configurado mirava `req.body`, que o serializer padrão do pino nunca inclui, e não cobria
+`req.headers`); segredos JWT sem piso de força mínimo (Alto — 1 caractere era aceito); nenhum rate
+limiting em nenhum endpoint (Alto); nenhum header de segurança (`helmet`) (Alto); Swagger exposto
+incondicionalmente, inclusive em produção (Médio). SQL injection, XSS e CSRF verificados e já
+estavam corretos (parametrização via Prisma, escape automático do React, `SameSite=Lax` + Bearer
+token).
+
+**Backend (corrigido):** filtro global de exceções sem contexto de correlação pra depurar um 500
+de produção (Alto); sem rede de segurança contra `unhandledRejection`/`uncaughtException` (Alto);
+emissão de ticket sem retry nem visibilidade de falha — um blip de infra na hora certa deixava uma
+reserva paga sem ticket, silenciosamente, pra sempre (Alto); cancelamento de cruzeiro pelo admin
+não cascateava pra reservas/tickets, nem notificava ninguém (Alto). Concorrência (locks +
+transação em todo fluxo crítico), paginação e idempotência já verificados sólidos.
+
+**Frontend (corrigido):** nenhum fluxo de reserva existia em lugar nenhum do site — o achado mais
+crítico da revisão inteira (Crítico). O mapa do navio já tinha o botão "Selecionar cabine"
+totalmente construído desde a etapa anterior (comentário no código já avisava: "fornecido pelo
+fluxo de checkout, ainda não implementado — ver ADR-0008"), só faltava ligar. Construído
+`apps/web/src/features/booking/` (`CabinBookingFlow` + `BookingModal`, máquina de estados
+hold → hóspedes → pagamento → confirmação), 4 novas funções em `bookings.service.ts`
+(`holdCabin`/`updateBookingDetails`/`checkoutBooking`/`releaseHold`), suporte a
+`?redirect=` no `/login` (só aceita caminho interno — nunca um open redirect) pra devolver o
+usuário à página do cruzeiro após logar, e o botão morto "Consultar" de `CruiseCabins` virou um
+link real até o mapa. Também corrigidos: sessão expirava de vez após 15min sem nenhum aviso (Alto
+— renovação silenciosa proativa a cada 10min + ao voltar o foco da aba); botão "Tentar novamente"
+de erro não fazia nada em nenhuma tela client-side (Alto — `router.refresh()` só re-executa dados
+de Server Component). Verificado de ponta a ponta num browser real via Playwright — login, mapa,
+hold, hóspedes, pagamento PIX, confirmação, chegada em "Minha viagem" (`/reservas`, já existente e
+rica, só faltava uma reserva `CONFIRMED` de verdade pra mostrar).
+
+**DevOps (corrigido):** Dockerfiles rodavam como root no estágio de runtime — ganharam `USER
+node`; `docker-compose.yml` não tinha o serviço `mailhog` (só existia em
+`docker-compose.test.yml`); o job `e2e-tests` do CI nunca subia a API (o próprio comentário do
+workflow admitia isso) — reescrito para subir toda a infra, migrar, semear, buildar, iniciar a API
+em background e esperar `/health` antes do Playwright rodar; `ship-map.spec.ts` apontava pro slug
+do cruzeiro antes da renomeação (pulava silenciosamente desde então).
+
+**Testes:** `coupon.policy.spec.ts` (regra de organizador), `rbac.e2e-spec.ts` (2 casos novos:
+Artist entre organizadores, cupom cross-organizador), `admin.e2e-spec.ts` (cascade de
+cancelamento), `env.schema.spec.ts` (piso de segredo, `sslmode` em produção), e o novo
+`booking-flow.spec.ts` (Playwright, 2 casos: fluxo completo de reserva de ponta a ponta e cupom
+inválido tratado sem quebrar a tela). Suíte final: 263 unitários + 138 integração (API) + 30
+unitários (web) + 10 E2E (Playwright) — todos verdes; `typecheck`/`lint` limpos nos dois apps.
+
+**Nota sobre o dev DB compartilhado:** verificar o fluxo de reserva em browser real expôs (não
+causou) uma característica do ambiente local: sem um banco de teste separado nesta máquina, cada
+execução de spec de integração/E2E consome cabines de verdade do cruzeiro-alvo, e a leitura do
+mapa fica em cache por 30s (`revalidate: 30` em `safeFetchJson`) — rodar o mesmo spec várias vezes
+em sequência rápida contra o mesmo cruzeiro pode ver um retrato defasado e esbarrar num 409 de
+concorrência legítimo. `booking-flow.spec.ts` já lida com isso (retry pra próxima cabine
+disponível, um cruzeiro por teste); reservas HELD/PAYMENT_PENDING abandonadas por execuções
+repetidas foram limpas do dev DB ao final desta sessão.
+
+**Por quê:** pedido explícito e extenso do usuário — auditoria completa antes de uma avaliação
+profissional, com instrução direta de corrigir (não só listar) e de fechar com um relatório do que
+foi melhorado.
+
 <!-- Novas entradas são adicionadas ao final, em ordem cronológica, cada uma com data, "O quê" e "Por quê". -->

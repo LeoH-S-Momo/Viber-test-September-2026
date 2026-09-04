@@ -1,5 +1,5 @@
-import { Logger } from '@nestjs/common';
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { Injectable, Logger } from '@nestjs/common';
+import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import type { Job } from 'bullmq';
 import { BookingsService } from '../modules/bookings/application/bookings.service';
 import { CABIN_HOLD_EXPIRATION_QUEUE, type CabinHoldExpirationJobData } from './cabin-hold-queue';
@@ -17,6 +17,7 @@ import { CABIN_HOLD_EXPIRATION_QUEUE, type CabinHoldExpirationJobData } from './
  * (pode ja ter sido confirmada/cancelada por outra via) em vez de assumir
  * que o job ainda e valido so por ter disparado.
  */
+@Injectable()
 @Processor(CABIN_HOLD_EXPIRATION_QUEUE)
 export class CabinHoldExpirationProcessor extends WorkerHost {
   private readonly logger = new Logger(CabinHoldExpirationProcessor.name);
@@ -28,5 +29,13 @@ export class CabinHoldExpirationProcessor extends WorkerHost {
   async process(job: Job<CabinHoldExpirationJobData>): Promise<void> {
     await this.bookingsService.expireHoldIfStillPending(job.data.bookingId);
     this.logger.debug(`Hold expirado (ou ja resolvido antes): booking ${job.data.bookingId}`);
+  }
+
+  /** So visibilidade — ver o comentario da classe: uma falha aqui nunca compromete corretude (o proximo hold-attempt resolve sozinho), so vale saber que aconteceu. */
+  @OnWorkerEvent('failed')
+  onJobFailed(job: Job<CabinHoldExpirationJobData>, error: Error): void {
+    const maxAttempts = job.opts.attempts ?? 1;
+    if (job.attemptsMade < maxAttempts) return;
+    this.logger.warn(`Expiracao de hold esgotou ${maxAttempts} tentativas pra reserva ${job.data.bookingId}: ${error.message}.`);
   }
 }

@@ -7,7 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 
 /**
  * Filtro global — garante que NENHUM erro nao tratado vaze detalhes internos
@@ -46,7 +46,13 @@ export class AllExceptionsFilter implements ExceptionFilter {
       }
     }
 
-    this.logger.error(exception instanceof Error ? exception.stack : exception);
+    // `req.id` vem do pino-http (mesmo id que aparece no log de acesso da request, ver
+    // app.module.ts) — sem ele, correlacionar um 500 aqui com a linha de acesso correspondente
+    // em producao exigia casar por horario na mao. `method`/`url` sozinhos ja ajudam mesmo
+    // quando o id nao esta disponivel (ex.: exceptions.filter chamado fora do pipeline HTTP).
+    const request = ctx.getRequest<Request & { id?: string }>();
+    const context = `${request.method} ${request.url} (reqId=${request.id ?? 'n/a'})`;
+    this.logger.error(`${context}: ${exception instanceof Error ? exception.stack : String(exception)}`);
     response.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
       statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
       message: 'Erro interno do servidor.',

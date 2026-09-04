@@ -1,7 +1,9 @@
 import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RoleKey } from '@prisma/client';
 import { PrismaService } from '../../../database/prisma/prisma.service';
 import { requireOrganizerId } from '../../../common/utils/auth-context';
+import { DomainEvent } from '../../../domain-events/domain-events';
 import type { AuthenticatedUser } from '../../auth/types/jwt-payload';
 import { ActivityCapacityPolicy } from '../domain/activity-capacity.policy';
 import { ActivitySchedulingPolicy } from '../domain/activity-scheduling.policy';
@@ -25,6 +27,7 @@ export class ActivitiesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly activitiesRepository: ActivitiesRepository,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   private async requireOwnedConfirmedBooking(bookingId: string, userId: string) {
@@ -52,7 +55,7 @@ export class ActivitiesService {
   }
 
   async reserveEvent(userId: string, bookingId: string, eventId: string, partySize: number) {
-    return this.prisma.$transaction(async (tx) => {
+    const { reservation, isNew } = await this.prisma.$transaction(async (tx) => {
       const booking = await this.requireOwnedConfirmedBooking(bookingId, userId);
 
       const event = await this.activitiesRepository.lockEventForUpdate(tx, eventId);
@@ -66,7 +69,7 @@ export class ActivitiesService {
       const existing = await this.activitiesRepository.findEventReservation(tx, eventId, bookingId);
       if (existing && existing.status === 'CONFIRMED') {
         if (existing.partySize === partySize) {
-          return existing; // retry idempotente — mesma reserva, nada muda.
+          return { reservation: existing, isNew: false }; // retry idempotente — mesma reserva, nada muda.
         }
         throw new ConflictException(
           'Você já reservou este evento — cancele a reserva atual antes de mudar o número de pessoas.',
@@ -79,8 +82,15 @@ export class ActivitiesService {
       const windows = await this.activitiesRepository.findBookingTimeWindows(tx, bookingId);
       ActivitySchedulingPolicy.assertNoConflict(windows, { start: event.startAt, end: event.endAt, label: event.title });
 
-      return this.activitiesRepository.upsertEventReservation(tx, { eventId, bookingId, partySize });
+      const upserted = await this.activitiesRepository.upsertEventReservation(tx, { eventId, bookingId, partySize });
+      return { reservation: upserted, isNew: true };
     });
+
+    // So emite pra uma reserva de verdade (nao o retry idempotente que so devolveu o que ja existia).
+    if (isNew) {
+      this.eventEmitter.emit(DomainEvent.EVENT_BOOKED, { bookingId, eventId });
+    }
+    return reservation;
   }
 
   async cancelEventReservation(userId: string, bookingId: string, reservationId: string) {

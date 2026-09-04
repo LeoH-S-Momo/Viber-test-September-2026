@@ -31,6 +31,8 @@ export interface CouponDiscountShape {
 export interface CouponRecord extends CouponDiscountShape {
   id: string;
   code: string;
+  /** null = cupom global (qualquer organizador) — nao-null restringe a reservas de cruzeiros DESTE organizador (ver CouponPolicy.validate, regra de hardening ADR-0020). */
+  organizerId: string | null;
   minPurchaseAmount: Prisma.Decimal | null;
   maxUses: number | null;
   usedCount: number;
@@ -43,6 +45,8 @@ export interface CouponRecord extends CouponDiscountShape {
 
 export interface CouponValidationContext {
   cruiseId: string;
+  /** Organizador DONO do cruzeiro sendo reservado — confrontado contra `CouponRecord.organizerId` (ver ADR-0020: sem isto, um cupom de um organizador era redimivel em cruzeiros de QUALQUER outro). */
+  cruiseOrganizerId: string;
   /** subtotal (cabine + adicionais, antes de desconto/taxa) — base do valor minimo de compra. */
   subtotalAmount: Prisma.Decimal;
   /** Quantas vezes ESTE usuario ja usou este cupom (reservas ja confirmadas em algum momento, mesmo que depois canceladas) — ver BookingsRepository.countUserCouponUsage. */

@@ -157,7 +157,7 @@ export default function AdminUsersPage() {
       </form>
 
       {state.status === 'loading' && <Skeleton className="h-64 w-full rounded-2xl" />}
-      {state.status === 'ready' && !state.result.ok && <ErrorState message={state.result.message} />}
+      {state.status === 'ready' && !state.result.ok && <ErrorState message={state.result.message} onRetry={reload} />}
       {state.status === 'ready' && state.result.ok && (
         <>
           {state.result.data.data.length === 0 ? (

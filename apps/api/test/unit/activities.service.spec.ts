@@ -63,8 +63,9 @@ function buildService() {
     ship: { findUnique: jest.fn() },
   };
 
-  const service = new ActivitiesService(prisma as never, activitiesRepository as never);
-  return { service, activitiesRepository, prisma };
+  const eventEmitter = { emit: jest.fn() };
+  const service = new ActivitiesService(prisma as never, activitiesRepository as never, eventEmitter as never);
+  return { service, activitiesRepository, prisma, eventEmitter };
 }
 
 describe('ActivitiesService', () => {

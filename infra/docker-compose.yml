@@ -47,3 +47,13 @@ services:
       - "${MINIO_CONSOLE_PORT}:9001"
     volumes:
       - ../.data/minio:/data
+
+  # SMTP de mentira para inspecionar as notificacoes por e-mail em dev (ver
+  # docs/architecture/decisions/0019-events-and-notifications.md) — sem persistencia (a caixa de
+  # entrada vive em memoria), por isso sem volume: perder o container so limpa o que ja foi lido.
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    restart: unless-stopped
+    ports:
+      - "${MAILHOG_SMTP_PORT}:1025"
+      - "${MAILHOG_UI_PORT}:8025"

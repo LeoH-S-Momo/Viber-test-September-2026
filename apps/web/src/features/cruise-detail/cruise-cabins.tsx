@@ -4,6 +4,10 @@ import { buttonVariants } from '@/components/ui/button-styles';
 import { formatPrice } from '@/lib/format';
 import type { CruiseCabinPricing } from '@/types/cruise';
 
+/** Cada categoria e um resumo de preco, sem uma cabine fisica associada — a
+ * selecao de verdade (com hold/checkout) acontece por cabine especifica no
+ * mapa do navio, entao "Consultar" so leva ate la (ver ship-map.tsx). */
+
 export function CruiseCabins({ pricings }: { pricings: CruiseCabinPricing[] }) {
   if (pricings.length === 0) return null;
 
@@ -45,9 +49,9 @@ export function CruiseCabins({ pricings }: { pricings: CruiseCabinPricing[] }) {
               <p className="font-display text-2xl font-bold text-brand-800">
                 {formatPrice(pricing.price)}
               </p>
-              <span className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+              <a href="#mapa-do-navio" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
                 Consultar
-              </span>
+              </a>
             </div>
           </div>
         ))}

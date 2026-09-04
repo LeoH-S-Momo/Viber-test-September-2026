@@ -2,10 +2,12 @@ import { randomUUID } from 'node:crypto';
 import { ConflictException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bullmq';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { BookingStatus, CabinStatus, CruiseStatus, PaymentMethod, PaymentStatus, Prisma } from '@prisma/client';
 import type { Queue } from 'bullmq';
 import { CabinAvailabilityPolicy, type CabinAvailability } from '../../catalog/domain/cabin-availability.policy';
 import { AuditLogService } from '../../../audit/audit-log.service';
+import { DomainEvent } from '../../../domain-events/domain-events';
 import { PrismaService } from '../../../database/prisma/prisma.service';
 import { CABIN_HOLD_EXPIRATION_JOB, CABIN_HOLD_EXPIRATION_QUEUE } from '../../../jobs/cabin-hold-queue';
 import { TICKET_ISSUANCE_JOB, TICKET_ISSUANCE_QUEUE } from '../../../jobs/ticket-issuance-queue';
@@ -59,6 +61,7 @@ export class BookingsService {
     @InjectQueue(CABIN_HOLD_EXPIRATION_QUEUE) private readonly holdExpirationQueue: Queue,
     @InjectQueue(TICKET_ISSUANCE_QUEUE) private readonly ticketIssuanceQueue: Queue,
     private readonly auditLog: AuditLogService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   private get holdMinutes(): number {
@@ -192,6 +195,7 @@ export class BookingsService {
       }
     });
 
+    this.eventEmitter.emit(DomainEvent.BOOKING_CREATED, { bookingId: booking.id });
     await this.scheduleExpiration(booking.id, booking.holdExpiresAt);
     return booking;
   }
@@ -267,7 +271,17 @@ export class BookingsService {
         const found = await this.bookingsRepository.findCouponByCode(input.couponCode);
         const coupon = CouponPolicy.assertFound(found);
         const userUsageCount = await this.bookingsRepository.countUserCouponUsage(tx, userId, coupon.id);
-        CouponPolicy.validate(coupon, { cruiseId: locked.cruiseId, subtotalAmount: rawSubtotal, userUsageCount, now });
+        const cruise = await this.bookingsRepository.findCruiseOrganizerId(locked.cruiseId);
+        if (!cruise) {
+          throw new NotFoundException('Cruzeiro nao encontrado.');
+        }
+        CouponPolicy.validate(coupon, {
+          cruiseId: locked.cruiseId,
+          cruiseOrganizerId: cruise.organizerId,
+          subtotalAmount: rawSubtotal,
+          userUsageCount,
+          now,
+        });
         couponId = coupon.id;
         discountAmount = CouponPolicy.computeDiscount(coupon, rawSubtotal);
       }
@@ -391,8 +405,8 @@ export class BookingsService {
 
     const { chargeResult, timedOut } = await this.callGateway(payment, paymentMethod, idempotencyKey);
 
-    const finalBooking = await this.applyChargeOutcome(bookingId, payment.id, chargeResult, timedOut);
-    await this.onOutcomeApplied(finalBooking);
+    const { booking: finalBooking, paymentOutcome } = await this.applyChargeOutcome(bookingId, payment.id, chargeResult, timedOut);
+    await this.onOutcomeApplied(finalBooking, payment.id, paymentOutcome);
     return finalBooking;
   }
 
@@ -431,8 +445,8 @@ export class BookingsService {
 
     const result = await this.paymentGateway.retrieve(payment.simulatedTransactionId);
 
-    const finalBooking = await this.applyChargeOutcome(bookingId, payment.id, result, false);
-    await this.onOutcomeApplied(finalBooking);
+    const { booking: finalBooking, paymentOutcome } = await this.applyChargeOutcome(bookingId, payment.id, result, false);
+    await this.onOutcomeApplied(finalBooking, payment.id, paymentOutcome);
     return finalBooking;
   }
 
@@ -463,6 +477,11 @@ export class BookingsService {
       entityType: 'Booking',
       entityId: booking.id,
       metadata: { reason: reason?.trim() || 'Cancelada pelo usuario.' },
+    });
+    this.eventEmitter.emit(DomainEvent.BOOKING_CANCELLED, {
+      bookingId: booking.id,
+      reason: reason?.trim() || null,
+      cancelledBy: 'PASSENGER',
     });
 
     await this.cancelScheduledExpiration(booking.id);
@@ -556,7 +575,17 @@ export class BookingsService {
         throw new ConflictException('O cupom aplicado a esta reserva nao existe mais.');
       }
       const userUsageCount = await this.bookingsRepository.countUserCouponUsage(tx, userId, coupon.id);
-      CouponPolicy.validate(coupon, { cruiseId: locked.cruiseId, subtotalAmount: rawSubtotal, userUsageCount, now });
+      const cruise = await this.bookingsRepository.findCruiseOrganizerId(locked.cruiseId);
+      if (!cruise) {
+        throw new NotFoundException('Cruzeiro nao encontrado.');
+      }
+      CouponPolicy.validate(coupon, {
+        cruiseId: locked.cruiseId,
+        cruiseOrganizerId: cruise.organizerId,
+        subtotalAmount: rawSubtotal,
+        userUsageCount,
+        now,
+      });
       discountAmount = CouponPolicy.computeDiscount(coupon, rawSubtotal);
     }
 
@@ -611,6 +640,14 @@ export class BookingsService {
    * escopo aqui, nao uma confirmacao silenciosa de algo que o usuario
    * desistiu.
    */
+  /**
+   * `paymentOutcome` no retorno e o que o pagamento resolveu NESTA chamada (null quando nada
+   * resolveu — PENDING/timeout) — separado do status da RESERVA porque os dois podem divergir
+   * (ex.: pagamento aprovado mas a reserva ja tinha sido abandonada por outro caminho, ver o
+   * `if (locked.status !== BookingStatus.PAYMENT_PENDING)` abaixo). `onOutcomeApplied` usa os
+   * dois pra emitir exatamente os eventos de dominio certos (ver ADR-0019) — nunca dentro desta
+   * transacao, so depois que ela commitar.
+   */
   private async applyChargeOutcome(bookingId: string, paymentId: string, chargeResult: ChargeResult | null, timedOut: boolean) {
     return this.prisma.$transaction(async (tx) => {
       const locked = await this.bookingsRepository.lockBookingForUpdate(tx, bookingId);
@@ -620,7 +657,7 @@ export class BookingsService {
 
       if (timedOut || !chargeResult) {
         // Payment continua PENDING (ver callGateway) — nada a fazer alem de devolver o estado atual.
-        return tx.booking.findUniqueOrThrow({ where: { id: bookingId } });
+        return { booking: await tx.booking.findUniqueOrThrow({ where: { id: bookingId } }), paymentOutcome: null };
       }
 
       if (locked.status !== BookingStatus.PAYMENT_PENDING) {
@@ -633,7 +670,12 @@ export class BookingsService {
           paidAt: chargeResult.outcome === 'APPROVED' ? new Date() : undefined,
           failureReason: chargeResult.declineReason,
         });
-        return tx.booking.findUniqueOrThrow({ where: { id: bookingId } });
+        const booking = await tx.booking.findUniqueOrThrow({ where: { id: bookingId } });
+        // O usuario ainda merece saber que o cartao foi cobrado/recusado, mesmo a reserva ja
+        // tendo saido de PAYMENT_PENDING por outro caminho — so nao emite BOOKING_CONFIRMED
+        // (a reserva nao "confirmou" agora, so o pagamento resolveu tarde).
+        const paymentOutcome = chargeResult.outcome === 'APPROVED' || chargeResult.outcome === 'DECLINED' ? chargeResult.outcome : null;
+        return { booking, paymentOutcome };
       }
 
       if (chargeResult.outcome === 'PENDING') {
@@ -642,7 +684,7 @@ export class BookingsService {
           status: PaymentStatus.PENDING,
           simulatedTransactionId: chargeResult.gatewayTransactionId,
         });
-        return tx.booking.findUniqueOrThrow({ where: { id: bookingId } });
+        return { booking: await tx.booking.findUniqueOrThrow({ where: { id: bookingId } }), paymentOutcome: null };
       }
 
       if (chargeResult.outcome === 'DECLINED') {
@@ -653,11 +695,12 @@ export class BookingsService {
         });
         // "Confirmar ou liberar a reserva": recusa libera a reserva (mesmo desfecho de
         // cancelBooking, so que disparado pelo gateway em vez de uma acao explicita do usuario).
-        return this.bookingsRepository.updateStatus(tx, bookingId, {
+        const booking = await this.bookingsRepository.updateStatus(tx, bookingId, {
           status: BookingStatus.CANCELLED,
           cancelledAt: new Date(),
           cancellationReason: `Pagamento recusado: ${chargeResult.declineReason ?? 'motivo nao informado pelo gateway.'}`,
         });
+        return { booking, paymentOutcome: 'DECLINED' as const };
       }
 
       // APPROVED — "confirmar a reserva" + "confirmar a cabine" (a cabine e derivada do status da
@@ -673,10 +716,11 @@ export class BookingsService {
           await this.bookingsRepository.incrementCouponUsage(tx, coupon.id);
         }
       }
-      return this.bookingsRepository.updateStatus(tx, bookingId, {
+      const booking = await this.bookingsRepository.updateStatus(tx, bookingId, {
         status: BookingStatus.CONFIRMED,
         confirmedAt: new Date(),
       });
+      return { booking, paymentOutcome: 'APPROVED' as const };
     });
   }
 
@@ -687,8 +731,19 @@ export class BookingsService {
   }
 
   /** Efeitos colaterais pos-transacao de um desfecho de pagamento aplicado — nunca dentro da propria transacao. */
-  private async onOutcomeApplied(booking: { id: string; status: BookingStatus }): Promise<void> {
+  private async onOutcomeApplied(
+    booking: { id: string; status: BookingStatus },
+    paymentId: string,
+    paymentOutcome: 'APPROVED' | 'DECLINED' | null,
+  ): Promise<void> {
+    if (paymentOutcome === 'APPROVED') {
+      this.eventEmitter.emit(DomainEvent.PAYMENT_APPROVED, { paymentId, bookingId: booking.id });
+    } else if (paymentOutcome === 'DECLINED') {
+      this.eventEmitter.emit(DomainEvent.PAYMENT_FAILED, { paymentId, bookingId: booking.id, reason: null });
+    }
+
     if (booking.status === BookingStatus.CONFIRMED) {
+      this.eventEmitter.emit(DomainEvent.BOOKING_CONFIRMED, { bookingId: booking.id });
       await this.cancelScheduledExpiration(booking.id);
       await this.scheduleTicketIssuance(booking.id);
     } else if (booking.status === BookingStatus.CANCELLED) {

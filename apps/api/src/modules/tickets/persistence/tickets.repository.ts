@@ -96,6 +96,11 @@ export class TicketsRepository {
     return this.prisma.bookingGuest.findMany({ where: { bookingId }, select: { id: true } });
   }
 
+  /** Usado por `issueTicketsForBooking` so pra saber se um retry ja tinha completado antes (ver ADR-0019). */
+  countIssuedForBooking(bookingId: string) {
+    return this.prisma.ticket.count({ where: { bookingGuest: { bookingId } } });
+  }
+
   /**
    * Cancela (nao apaga — mantem o historico) todo ticket ainda `ISSUED` de
    * uma reserva que foi cancelada depois de confirmada e ja ter emitido

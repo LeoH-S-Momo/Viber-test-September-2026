@@ -3,6 +3,26 @@ import type { DiningReservation, EventReservation } from './activity';
 /** Espelha o retorno de GET /bookings/me e GET /bookings/:id (backend) — ver ADR-0010/ADR-0014. */
 export type BookingStatus = 'HELD' | 'PAYMENT_PENDING' | 'CONFIRMED' | 'CANCELLED' | 'EXPIRED' | 'COMPLETED' | 'REFUNDED';
 
+/**
+ * Espelha o registro cru de `Booking` (Prisma) devolvido por POST
+ * .../hold, PUT /bookings/:id/details e POST /bookings/:id/checkout — sem
+ * includes, ao contrario de `MyBooking` (usado por GET /bookings/me e pela
+ * pagina "Minha viagem"). Usado apenas pelo fluxo de reserva em si
+ * (apps/web/src/features/booking/).
+ */
+export interface BookingHold {
+  id: string;
+  status: BookingStatus;
+  cruiseId: string;
+  cabinId: string;
+  subtotalAmount: string;
+  discountAmount: string;
+  feeAmount: string;
+  totalAmount: string;
+  currency: string;
+  holdExpiresAt: string;
+}
+
 export interface MyBookingGuest {
   id: string;
   fullName: string;

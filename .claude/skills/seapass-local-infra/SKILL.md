@@ -1,24 +1,46 @@
 ---
-description: Start/verify SeaPass's local infra (Postgres, Redis) and dev servers (api, web) on this Windows machine — native services, no Docker. Use whenever asked to run, test, or verify SeaPass end to end, or when integration tests / the API health check report Postgres or Redis as down.
+description: Start/verify SeaPass's local infra (Postgres, Redis, MailHog) and dev servers (api, web) on this Windows machine — native services, no Docker. Use whenever asked to run, test, or verify SeaPass end to end, or when integration tests / the API health check report Postgres or Redis as down, or when e-mail notifications need to be inspected.
 ---
 
 # SeaPass local infra (this machine)
 
 This machine has **no Docker, no WSL** — `infra/docker-compose.yml` (the README's documented
-path) does not apply here. Postgres and Redis instead run as **native Windows services**,
-installed once (2026-09-04) and left running permanently. In a fresh session they should already
-be up; this skill is for verifying that and for the rare case a service didn't survive a reboot.
+path) does not apply here. Postgres and Redis run as **native Windows services**, installed once
+(2026-09-04) and left running permanently. MailHog (SMTP notifications, ver ADR-0019) runs as a
+**plain background process**, started per session — see step 1b. In a fresh session Postgres/Redis
+should already be up; this skill is for verifying that and for the rare case a service didn't
+survive a reboot.
 
 ## 1. Check first — usually nothing to do
 
 ```bash
 (echo > /dev/tcp/127.0.0.1/5432) >/dev/null 2>&1 && echo "postgres up" || echo "postgres down"
 (echo > /dev/tcp/127.0.0.1/6379) >/dev/null 2>&1 && echo "redis up" || echo "redis down"
+(echo > /dev/tcp/127.0.0.1/1025) >/dev/null 2>&1 && echo "mailhog smtp up" || echo "mailhog smtp down"
 curl -s http://localhost:3333/health   # once the API dev server is running
 ```
 
-If both ports are open, skip to step 3 (dev servers) — the two services below are already
-installed and set to Automatic startup, so a plain reboot should bring them back on its own.
+If Postgres/Redis ports are open, skip to step 3 (dev servers) — the two services below are
+already installed and set to Automatic startup, so a plain reboot should bring them back on its
+own. MailHog is NOT a service (see 1b) — check it every session, it won't survive one on its own.
+
+## 1b. MailHog (SMTP notifications, ver ADR-0019) — start per session
+
+```powershell
+Start-Process -FilePath 'C:\Users\Leo\mailhog\MailHog.exe' -WindowStyle Hidden
+```
+
+No admin elevation needed (unlike Postgres/Redis) — it's a plain background process, not a
+Windows service. That's deliberate: MailHog holds its inbox in memory only (nothing durable to
+protect across a reboot, unlike Postgres/Redis data) — restarting it just clears whatever test
+e-mails were sitting in the inbox, which is harmless. Binary already downloaded at
+`C:\Users\Leo\mailhog\MailHog.exe` (official `mailhog/MailHog` v1.0.1 Windows release) — if it's
+ever missing, re-download from `https://github.com/mailhog/MailHog/releases/download/v1.0.1/MailHog_windows_amd64.exe`.
+SMTP on `:1025` (what `apps/api`'s `SMTP_HOST`/`SMTP_PORT` defaults point to — no `.env` change
+needed), web UI to actually read the e-mails at `http://localhost:8025`. `pnpm test:integration`
+locally also hits this same instance (there's no separate test SMTP on this no-Docker machine —
+see the note in `docs/architecture/decisions/0019-events-and-notifications.md` about
+`infra/docker-compose.test.yml`'s `mailhog-test` service being CI-only here).
 
 ## 2. If a service is down — start it (don't reinstall)
 
@@ -45,6 +67,8 @@ Credentials (already provisioned, matches `apps/api/.env` / `.env.example`):
   (superuser `postgres` has no known password — don't need it for normal dev work; see "Full
   reinstall" if you ever do).
 - Redis: `localhost:6379`, no auth, no TLS.
+- MailHog: SMTP `localhost:1025` (no auth — accepts anything), web UI `http://localhost:8025`
+  (no auth either).
 
 ## 3. Dev servers (API + web)
 

@@ -89,7 +89,9 @@ describe('Organizer portal — dashboard, listas e isolamento multi-tenant (inte
       .send({ name: `Salao ${label}`, type: 'THEATER', capacity: 150 })
       .expect(201);
 
-    const artist = await request(server()).post('/artists').set(orgAuth).send({ name: `Artista ${label}` }).expect(201);
+    // Artistas sao dado de referencia compartilhado, criacao restrita a PLATFORM_ADMIN desde o
+    // hardening de ADR-0020 — organizador nao consegue mais criar via API, semeado direto.
+    const artist = await prisma.artist.create({ data: { name: `Artista ${label}` } });
 
     const restaurant = await request(server())
       .post(`/ships/${ship.body.id}/restaurants`)
@@ -134,7 +136,7 @@ describe('Organizer portal — dashboard, listas e isolamento multi-tenant (inte
       .send({
         cruiseId: cruise.body.id,
         venueId: venue.body.id,
-        artistId: artist.body.id,
+        artistId: artist.id,
         title: `Show ${label}`,
         startAt: '2027-11-02T20:00:00.000Z',
         endAt: '2027-11-02T22:00:00.000Z',
@@ -180,7 +182,7 @@ describe('Organizer portal — dashboard, listas e isolamento multi-tenant (inte
       cabinCategoryId: category.body.id,
       cabinId: cabin.body.id,
       venueId: venue.body.id,
-      artistId: artist.body.id,
+      artistId: artist.id,
       eventId: event.body.id,
       restaurantId: restaurant.body.id,
       diningSlotId: diningSlot.body.id,

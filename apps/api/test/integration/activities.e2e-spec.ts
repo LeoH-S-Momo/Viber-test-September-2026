@@ -83,8 +83,10 @@ describe('Onboard activities — event/dining reservations (integration)', () =>
       .expect(201);
     venueId = venue.body.id;
 
-    const artist = await request(server()).post('/artists').set(orgAuth).send({ name: `Artista ${label}` }).expect(201);
-    artistId = artist.body.id;
+    // Artistas sao dado de referencia compartilhado, criacao restrita a PLATFORM_ADMIN desde o
+    // hardening de ADR-0020 — organizador nao consegue mais criar via API, semeado direto.
+    const artist = await prisma.artist.create({ data: { name: `Artista ${label}` } });
+    artistId = artist.id;
 
     const restaurant = await request(server())
       .post(`/ships/${shipId}/restaurants`)

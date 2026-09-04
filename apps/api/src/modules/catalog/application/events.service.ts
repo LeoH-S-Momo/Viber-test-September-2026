@@ -1,6 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { CreateEventInput, EventQuery, UpdateEventInput } from '@seapass/contracts';
 import { AuditLogService } from '../../../audit/audit-log.service';
+import { DomainEvent } from '../../../domain-events/domain-events';
 import { EventsRepository } from '../persistence/events.repository';
 import { CruisesService } from './cruises.service';
 import { VenuesService } from './venues.service';
@@ -12,6 +14,7 @@ export class EventsService {
     private readonly cruisesService: CruisesService,
     private readonly venuesService: VenuesService,
     private readonly auditLog: AuditLogService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   findMany(query: EventQuery) {
@@ -53,8 +56,21 @@ export class EventsService {
   async update(organizerId: string, id: string, input: UpdateEventInput, actorUserId?: string) {
     const event = await this.findById(id);
     await this.cruisesService.findByIdForOrganizer(organizerId, event.cruise.id);
+
+    // So o que importa pro passageiro que ja reservou (ver "alteracao de evento" em
+    // NotificationsService.notifyEventUpdated) — mudar so a descricao, por exemplo, nao merece
+    // um e-mail dizendo "a programacao mudou".
+    const changedFields = (['startAt', 'endAt', 'venueId'] as const).filter((field) => {
+      if (input[field] === undefined) return false;
+      if (field === 'venueId') return input.venueId !== event.venueId;
+      return (input[field] as Date).getTime() !== event[field].getTime();
+    });
+
     const updated = await this.eventsRepository.update(id, input);
     await this.auditLog.record({ actorUserId: actorUserId ?? null, action: 'event.updated', entityType: 'Event', entityId: id, metadata: input });
+    if (changedFields.length > 0) {
+      this.eventEmitter.emit(DomainEvent.EVENT_UPDATED, { eventId: id, changedFields });
+    }
     return updated;
   }
 }

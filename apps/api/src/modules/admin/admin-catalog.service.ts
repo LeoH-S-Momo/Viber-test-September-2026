@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { CruiseStatus, Prisma } from '@prisma/client';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { BookingStatus, CruiseStatus, Prisma, TicketStatus } from '@prisma/client';
 import type {
   AdminCabinsQuery,
   AdminCruisesQuery,
@@ -11,6 +12,10 @@ import type {
 import { PrismaService } from '../../database/prisma/prisma.service';
 import { toPageResult, toSkipTake } from '../catalog/domain/pagination';
 import { AuditLogService } from '../../audit/audit-log.service';
+import { DomainEvent } from '../../domain-events/domain-events';
+
+/** Estados de reserva que ainda "existem" quando o cruzeiro e cancelado — os terminais (ja resolvidos) nao precisam de nada. */
+const CANCELLABLE_BOOKING_STATUSES: BookingStatus[] = [BookingStatus.HELD, BookingStatus.PAYMENT_PENDING, BookingStatus.CONFIRMED];
 
 /** Leitura global (sem escopo de organizador) + acoes administrativas do catalogo — ver ADR-0018. */
 @Injectable()
@@ -18,6 +23,7 @@ export class AdminCatalogService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditLog: AuditLogService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   // --- Cruzeiros ---
@@ -64,19 +70,61 @@ export class AdminCatalogService {
     return cruise;
   }
 
+  /**
+   * Cancelar um cruzeiro nao e so uma flag no proprio Cruise — antes desta revisao de hardening
+   * (ADR-0020) so mudava `Cruise.status`, deixando passageiros com reservas `CONFIRMED` e tickets
+   * `ISSUED` pra uma viagem que a plataforma acabou de cancelar (nem notificacao, nem estorno
+   * "logico" da reserva). Agora cascade-cancela toda reserva ainda nao-terminal (HELD/
+   * PAYMENT_PENDING/CONFIRMED) e os tickets ja emitidos dela, tudo na MESMA transacao do cruzeiro
+   * — e emite `BOOKING_CANCELLED` por reserva afetada depois de commitar (ver ADR-0019: nunca
+   * dentro da transacao), pra cada passageiro receber a notificacao de cancelamento de verdade.
+   */
   async cancelCruise(actorUserId: string, id: string, reason?: string) {
     const cruise = await this.prisma.cruise.findUnique({ where: { id } });
     if (!cruise) {
       throw new NotFoundException('Cruzeiro nao encontrado.');
     }
-    const updated = await this.prisma.cruise.update({ where: { id }, data: { status: CruiseStatus.CANCELLED } });
+
+    const cancellationReason = reason?.trim() || 'Cruzeiro cancelado pela administracao da plataforma.';
+
+    const { updated, affectedBookingIds } = await this.prisma.$transaction(async (tx) => {
+      const affectedBookings = await tx.booking.findMany({
+        where: { cruiseId: id, status: { in: CANCELLABLE_BOOKING_STATUSES } },
+        select: { id: true },
+      });
+
+      const result = await tx.cruise.update({ where: { id }, data: { status: CruiseStatus.CANCELLED } });
+
+      if (affectedBookings.length > 0) {
+        await tx.booking.updateMany({
+          where: { id: { in: affectedBookings.map((b) => b.id) } },
+          data: { status: BookingStatus.CANCELLED, cancelledAt: new Date(), cancellationReason },
+        });
+        // Bulk direto (nao um loop por reserva) — evita N+1 num cruzeiro com dezenas de reservas.
+        await tx.ticket.updateMany({
+          where: { status: TicketStatus.ISSUED, bookingGuest: { booking: { cruiseId: id } } },
+          data: { status: TicketStatus.CANCELLED },
+        });
+      }
+
+      return { updated: result, affectedBookingIds: affectedBookings.map((b) => b.id) };
+    });
+
     await this.auditLog.record({
       actorUserId,
       action: 'cruise.admin_cancelled',
       entityType: 'Cruise',
       entityId: id,
-      metadata: reason ? { reason } : undefined,
+      metadata: { reason: reason ?? null, affectedBookings: affectedBookingIds.length },
     });
+    for (const bookingId of affectedBookingIds) {
+      this.eventEmitter.emit(DomainEvent.BOOKING_CANCELLED, {
+        bookingId,
+        reason: cancellationReason,
+        cancelledBy: 'ADMIN',
+      });
+    }
+
     return updated;
   }
 

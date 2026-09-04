@@ -1,18 +1,25 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
 import { RefreshCw, ServerCrash } from 'lucide-react';
 import { buttonVariants } from './button-styles';
 
 export function ErrorState({
   title = 'Não foi possível carregar esta página',
   message,
+  onRetry,
 }: {
   title?: string;
   message: string;
+  /**
+   * Sem isto, "Tentar novamente" chamava `router.refresh()` — no App Router isso só re-busca
+   * dados de Server Component, preservando de propósito o estado de Client Component (onde
+   * TODA a lógica de fetch desta tela realmente vive, ver `useEffect`s de cada página). O botão
+   * ficava um no-op silencioso em toda tela que usa este componente (~30 no app). Passe o
+   * `reload`/`load` da própria página quando existir; sem ele, cai num reload de verdade da
+   * página inteira — mais pesado, mas GENUINAMENTE recupera (inclusive de uma sessão expirada).
+   */
+  onRetry?: () => void;
 }) {
-  const router = useRouter();
-
   return (
     <div
       role="alert"
@@ -25,7 +32,7 @@ export function ErrorState({
       <p className="max-w-md text-sm text-red-700">{message}</p>
       <button
         type="button"
-        onClick={() => router.refresh()}
+        onClick={() => (onRetry ? onRetry() : window.location.reload())}
         className={buttonVariants({ variant: 'outline', size: 'sm', className: 'mt-2' })}
       >
         <RefreshCw className="h-4 w-4" aria-hidden="true" />

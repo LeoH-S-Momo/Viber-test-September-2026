@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState, type FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useEffect, useState, type FormEvent } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { LogIn } from 'lucide-react';
 import { Container } from '@/components/ui/container';
 import { buttonVariants } from '@/components/ui/button-styles';
@@ -21,9 +21,29 @@ function redirectPathFor(roles: Array<{ key: string }>): string {
   return '/ingressos';
 }
 
+/**
+ * So aceita um `?redirect=` que seja um caminho interno de verdade — nunca
+ * uma URL absoluta/protocol-relative (`//host/...`), que mandaria o usuario
+ * pra fora do site depois de logar (open redirect).
+ */
+function isSafeRedirect(path: string | null): path is string {
+  return !!path && path.startsWith('/') && !path.startsWith('//');
+}
+
 export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
+  );
+}
+
+/** Separado do default export pra `useSearchParams()` (le o `?redirect=`) ficar dentro do Suspense exigido pelo Next 15. */
+function LoginForm() {
   const { login, user } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirect = searchParams.get('redirect');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -31,9 +51,9 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (user) {
-      router.replace(redirectPathFor(user.roles));
+      router.replace(isSafeRedirect(redirect) ? redirect : redirectPathFor(user.roles));
     }
-  }, [user, router]);
+  }, [user, router, redirect]);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();

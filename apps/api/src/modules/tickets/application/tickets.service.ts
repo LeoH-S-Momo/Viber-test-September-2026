@@ -1,7 +1,9 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as QRCode from 'qrcode';
 import { Prisma, TicketStatus, type BookingStatus } from '@prisma/client';
 import { AuditLogService } from '../../../audit/audit-log.service';
+import { DomainEvent } from '../../../domain-events/domain-events';
 import { PrismaService } from '../../../database/prisma/prisma.service';
 import { CheckInPolicy, type CheckInCandidate, type CheckInOutcome } from '../domain/check-in.policy';
 import { generateSecureTicketCode } from '../domain/secure-code';
@@ -31,6 +33,7 @@ export class TicketsService {
     private readonly prisma: PrismaService,
     private readonly ticketsRepository: TicketsRepository,
     private readonly auditLog: AuditLogService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   /**
@@ -44,8 +47,19 @@ export class TicketsService {
    */
   async issueTicketsForBooking(bookingId: string): Promise<number> {
     const guests = await this.ticketsRepository.findGuestIdsForBooking(bookingId);
+    // Contado ANTES do upsert — distingue "primeira vez que todos os tickets desta reserva
+    // saem emitidos" de "retry do BullMQ depois de um sucesso anterior" (o upsert em si e
+    // idempotente pro BANCO, mas sem esta checagem o EVENTO de dominio dispararia nos dois
+    // casos, reenviando "seu ingresso esta pronto" numa retentativa que na verdade nao criou
+    // nada novo — ver ADR-0019 sobre idempotencia).
+    const alreadyIssued = await this.ticketsRepository.countIssuedForBooking(bookingId);
+
     for (const guest of guests) {
       await this.ticketsRepository.createTicketForGuest(guest.id, generateSecureTicketCode());
+    }
+
+    if (guests.length > 0 && alreadyIssued < guests.length) {
+      this.eventEmitter.emit(DomainEvent.TICKET_GENERATED, { bookingId, ticketCount: guests.length });
     }
     return guests.length;
   }
@@ -120,6 +134,7 @@ export class TicketsService {
       entityId: view.ticketId,
       metadata: { code: view.code, cruiseSlug: view.cruiseSlug, location: location ?? null },
     });
+    this.eventEmitter.emit(DomainEvent.CHECKIN_COMPLETED, { ticketId: view.ticketId, staffUserId });
 
     return view;
   }

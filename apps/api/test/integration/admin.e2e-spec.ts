@@ -437,6 +437,92 @@ describe('Admin panel (integration)', () => {
       expect(entry).toBeDefined();
     });
 
+    it('cancelar um cruzeiro cascade-cancela reservas/tickets ainda ativos e notifica os passageiros (hardening, ver ADR-0020)', async () => {
+      const label = unique('cascadecancel');
+      const port = await prisma.port.create({ data: { name: `Porto ${label}`, country: 'Brasil' } });
+      const cruise = await request(server())
+        .post('/cruises')
+        .set(orgAuth)
+        .send({
+          shipId,
+          title: `Cruzeiro ${label}`,
+          theme: 'Teste',
+          embarkationDate: '2027-12-10T12:00:00Z',
+          disembarkationDate: '2027-12-15T12:00:00Z',
+          embarkationPortId: port.id,
+          disembarkationPortId: port.id,
+        })
+        .expect(201);
+      await request(server())
+        .post(`/cruises/${cruise.body.id}/itinerary-stops`)
+        .set(orgAuth)
+        .send({ portId: port.id, dayNumber: 1, isEmbarkation: true })
+        .expect(201);
+      await request(server())
+        .post(`/cruises/${cruise.body.id}/pricing`)
+        .set(orgAuth)
+        .send({ cabinCategoryId, price: 1500 })
+        .expect(201);
+      await request(server()).post(`/cruises/${cruise.body.id}/publish`).set(orgAuth).expect(200);
+
+      const cabin = await request(server())
+        .post(`/decks/${deckId}/cabins`)
+        .set(orgAuth)
+        .send({ cabinCategoryId, code: `CC${unique('x').slice(-4)}` })
+        .expect(201);
+
+      const hold = await request(server())
+        .post(`/cruises/${cruise.body.slug}/cabins/${cabin.body.id}/hold`)
+        .set('Authorization', `Bearer ${passengerToken}`)
+        .expect(201);
+      await request(server())
+        .put(`/bookings/${hold.body.id}/details`)
+        .set('Authorization', `Bearer ${passengerToken}`)
+        .send({ guests: [{ fullName: 'Passageiro Cascade', documentType: 'PASSPORT', documentNumber: unique('DOC'), isPrimary: true }] })
+        .expect(200);
+      const checkout = await request(server())
+        .post(`/bookings/${hold.body.id}/checkout`)
+        .set('Authorization', `Bearer ${passengerToken}`)
+        .send({ paymentMethod: 'PIX' })
+        .expect(200);
+      expect(checkout.body.status).toBe('CONFIRMED');
+
+      let ticketId: string | null = null;
+      for (let i = 0; i < 30; i += 1) {
+        const guest = await prisma.bookingGuest.findFirst({ where: { bookingId: hold.body.id } });
+        const ticket = guest ? await prisma.ticket.findUnique({ where: { bookingGuestId: guest.id } }) : null;
+        if (ticket) {
+          ticketId = ticket.id;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      expect(ticketId).not.toBeNull();
+
+      await request(server())
+        .patch(`/admin/cruises/${cruise.body.id}/cancel`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ reason: 'Furacao — cancelamento de seguranca' })
+        .expect(200);
+
+      const bookingRow = await prisma.booking.findUniqueOrThrow({ where: { id: hold.body.id } });
+      expect(bookingRow.status).toBe('CANCELLED');
+      const ticketRow = await prisma.ticket.findUniqueOrThrow({ where: { id: ticketId! } });
+      expect(ticketRow.status).toBe('CANCELLED');
+
+      let notifications: Array<{ type: string; deliveryStatus: string }> = [];
+      for (let i = 0; i < 30; i += 1) {
+        const page = await request(server())
+          .get('/notifications/me?pageSize=20')
+          .set('Authorization', `Bearer ${passengerToken}`)
+          .expect(200);
+        notifications = page.body.data;
+        if (notifications.some((n) => n.type === 'BOOKING_CANCELLED')) break;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      expect(notifications.some((n) => n.type === 'BOOKING_CANCELLED')).toBe(true);
+    }, 15_000);
+
     it('navios: lista com busca e mostra detalhe com decks/contadores', async () => {
       const list = await request(server())
         .get(`/admin/ships?organizerId=${organizerId}`)

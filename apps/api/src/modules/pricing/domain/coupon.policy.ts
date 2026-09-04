@@ -39,6 +39,18 @@ export class CouponPolicy {
       throw new ConflictException('Este cupom esta expirado ou ainda nao comecou a valer.');
     }
 
+    // Falsy (null/undefined) = cupom global (qualquer organizador) — truthy so vale pra
+    // cruzeiros DO organizador dono do cupom. Sem esta regra, um cupom criado por/para o
+    // Organizador A era redimivel em QUALQUER cruzeiro de QUALQUER organizador (ver ADR-0020) —
+    // a mesma mensagem generica de "cupom nao e valido para este cruzeiro" da regra de
+    // applicableCruiseIds logo abaixo, de proposito: nao revela ao cliente SE o cupom existe pra
+    // outro organizador. Checa truthy (nao `!== null`) de proposito: um chamador/mock que so
+    // omite `organizerId` (undefined) deve se comportar como "global", nao como "restrito a
+    // undefined".
+    if (coupon.organizerId && coupon.organizerId !== context.cruiseOrganizerId) {
+      throw new ConflictException('Este cupom nao e valido para este cruzeiro.');
+    }
+
     // Lista vazia = valido para qualquer cruzeiro (ver CouponRecord.applicableCruiseIds).
     if (coupon.applicableCruiseIds.length > 0 && !coupon.applicableCruiseIds.includes(context.cruiseId)) {
       throw new ConflictException('Este cupom nao e valido para este cruzeiro.');

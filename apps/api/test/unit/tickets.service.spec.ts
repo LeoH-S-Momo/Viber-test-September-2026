@@ -49,14 +49,16 @@ function buildService() {
     markCheckedIn: jest.fn(),
     createTicketForGuest: jest.fn(),
     findGuestIdsForBooking: jest.fn(),
+    countIssuedForBooking: jest.fn().mockResolvedValue(0),
     cancelTicketsForBooking: jest.fn(),
   };
   const tx = {};
   const prisma = { $transaction: jest.fn((callback: (tx: unknown) => unknown) => callback(tx)) };
   const auditLog = { record: jest.fn() };
+  const eventEmitter = { emit: jest.fn() };
 
-  const service = new TicketsService(prisma as never, ticketsRepository as never, auditLog as never);
-  return { service, ticketsRepository, prisma, tx, auditLog };
+  const service = new TicketsService(prisma as never, ticketsRepository as never, auditLog as never, eventEmitter as never);
+  return { service, ticketsRepository, prisma, tx, auditLog, eventEmitter };
 }
 
 describe('TicketsService', () => {

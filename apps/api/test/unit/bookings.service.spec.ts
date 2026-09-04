@@ -31,6 +31,7 @@ function buildService() {
     findActiveBookingPlain: jest.fn(),
     findCruiseStatus: jest.fn(),
     findCruiseBySlug: jest.fn(),
+    findCruiseOrganizerId: jest.fn().mockResolvedValue({ organizerId: 'org-1' }),
     findExperiencesByIds: jest.fn().mockResolvedValue([]),
     lockExperiencesForUpdate: jest.fn().mockResolvedValue([]),
     sumActiveExperiencePartySize: jest.fn().mockResolvedValue(new Map()),
@@ -64,6 +65,7 @@ function buildService() {
   const holdExpirationQueue = { add: jest.fn(), remove: jest.fn() };
   const ticketIssuanceQueue = { add: jest.fn(), remove: jest.fn() };
   const auditLog = { record: jest.fn() };
+  const eventEmitter = { emit: jest.fn() };
 
   const service = new BookingsService(
     prisma as never,
@@ -74,6 +76,7 @@ function buildService() {
     holdExpirationQueue as never,
     ticketIssuanceQueue as never,
     auditLog as never,
+    eventEmitter as never,
   );
 
   return {
@@ -87,6 +90,7 @@ function buildService() {
     holdExpirationQueue,
     ticketIssuanceQueue,
     auditLog,
+    eventEmitter,
   };
 }
 

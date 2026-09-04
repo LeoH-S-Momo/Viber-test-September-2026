@@ -23,3 +23,13 @@ services:
     image: redis:7-alpine
     ports:
       - "6380:6379"
+
+  # SMTP de mentira pra teste de integracao das notificacoes (ver
+  # docs/architecture/decisions/0019-events-and-notifications.md) — mesma ideia do MailHog usado
+  # em dev (apps/api/.claude/skills/seapass-local-infra/SKILL.md), so que via imagem Docker aqui
+  # (CI tem Docker; a maquina de dev deste projeto nao tem, por isso o binario portatil la).
+  mailhog-test:
+    image: mailhog/mailhog:v1.0.1
+    ports:
+      - "1026:1025" # SMTP
+      - "8026:8025" # API/UI web

@@ -10,6 +10,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import {
   ForgotPasswordSchema,
@@ -63,7 +64,10 @@ export class AuthController {
     };
   }
 
+  // Limites bem mais apertados que o global (ver app.module.ts) nas rotas classicas de
+  // brute-force/abuso de auth — ver ADR-0020.
   @Public()
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('register')
   async register(
     @Body(new ZodValidationPipe(RegisterSchema)) body: RegisterInput,
@@ -74,6 +78,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('register/organizer')
   async registerOrganizer(
     @Body(new ZodValidationPipe(RegisterOrganizerSchema)) body: RegisterOrganizerInput,
@@ -84,6 +89,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('login')
   @HttpCode(HttpStatus.OK)
   async login(
@@ -95,6 +101,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   async refresh(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
@@ -116,6 +123,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
   async forgotPassword(@Body(new ZodValidationPipe(ForgotPasswordSchema)) body: ForgotPasswordInput) {

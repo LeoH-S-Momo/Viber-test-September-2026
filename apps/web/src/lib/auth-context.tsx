@@ -32,34 +32,79 @@ async function parseAuthResult(response: Response): Promise<AuthResult> {
   return (await response.json()) as AuthResult;
 }
 
+/**
+ * O access token dura 15min (`JWT_ACCESS_EXPIRES_IN`, ver apps/api/.env.example) — sem uma
+ * renovacao proativa, qualquer sessao com mais de 15min de uso passava a falhar em toda
+ * chamada autenticada (401 generico, sem logout nem redirecionamento — so um erro confuso na
+ * tela) ate um reload manual da pagina. Renovar a cada 10min (bem antes de expirar, com folga
+ * pra latencia de rede) mantem a sessao viva enquanto a aba ficar aberta e o refresh token
+ * (cookie httpOnly, 7 dias) continuar valido — nunca espera a request do USUARIO falhar
+ * primeiro pra so entao reagir.
+ */
+const SILENT_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  const refreshSession = useCallback(async (): Promise<boolean> => {
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/auth/refresh`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        // Refresh token ausente/expirado/revogado — a sessao acabou de verdade (nao um erro de
+        // rede transitorio). Limpa o estado local pra RequireRole mandar pro /login de forma
+        // limpa, em vez de deixar o app preso repetindo requests autenticadas que nunca vao
+        // funcionar de novo.
+        setAccessToken(null);
+        setUser(null);
+        return false;
+      }
+      const result = await parseAuthResult(response);
+      setAccessToken(result.accessToken);
+      setUser(result.user);
+      return true;
+    } catch {
+      // Falha de rede (API fora do ar momentaneamente) — mantem a sessao atual como esta e
+      // tenta de novo no proximo tick do timer, em vez de derrubar o usuario por uma
+      // instabilidade passageira.
+      return false;
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      try {
-        const response = await fetch(`${getApiBaseUrl()}/auth/refresh`, {
-          method: 'POST',
-          credentials: 'include',
-        });
-        if (response.ok && !cancelled) {
-          const result = await parseAuthResult(response);
-          setAccessToken(result.accessToken);
-          setUser(result.user);
-        }
-      } catch {
-        // Sem sessao valida (sem cookie, expirado, API fora do ar) — segue deslogado, sem erro visivel.
-      } finally {
-        if (!cancelled) setIsLoading(false);
-      }
+      await refreshSession();
+      if (!cancelled) setIsLoading(false);
     })();
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- so na montagem, refreshSession e estavel (useCallback sem deps)
   }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    const interval = setInterval(() => {
+      void refreshSession();
+    }, SILENT_REFRESH_INTERVAL_MS);
+    // Navegadores pausam/atrasam timers de abas em segundo plano — sem isto, um laptop
+    // suspenso ou uma aba minimizada por mais de 15min (mais do que o timer sozinho garantiria
+    // a tempo) volta com o access token ja expirado. Renovar tambem ao reganhar foco cobre esse
+    // caso sem depender so do intervalo.
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void refreshSession();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [user, refreshSession]);
 
   const login = useCallback(async (email: string, password: string): Promise<LoginResult> => {
     try {

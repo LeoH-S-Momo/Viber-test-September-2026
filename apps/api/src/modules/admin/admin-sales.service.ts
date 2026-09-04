@@ -1,9 +1,11 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { BookingStatus, Prisma } from '@prisma/client';
 import type { AdminBookingsQuery, AdminCheckInsQuery, AdminPaymentsQuery, AdminTicketsQuery } from '@seapass/contracts';
 import { PrismaService } from '../../database/prisma/prisma.service';
 import { toPageResult, toSkipTake } from '../catalog/domain/pagination';
 import { AuditLogService } from '../../audit/audit-log.service';
+import { DomainEvent } from '../../domain-events/domain-events';
 import { TicketsService } from '../tickets/application/tickets.service';
 
 /** Estados de reserva que ainda podem ser cancelados por um admin — os terminais (ja resolvidos) nao. */
@@ -16,6 +18,7 @@ export class AdminSalesService {
     private readonly prisma: PrismaService,
     private readonly auditLog: AuditLogService,
     private readonly ticketsService: TicketsService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   // --- Reservas ---
@@ -104,6 +107,7 @@ export class AdminSalesService {
       entityId: id,
       metadata: { previousStatus: booking.status, reason },
     });
+    this.eventEmitter.emit(DomainEvent.BOOKING_CANCELLED, { bookingId: id, reason: reason ?? null, cancelledBy: 'ADMIN' });
     return updated;
   }
 

@@ -110,6 +110,11 @@ export class BookingsRepository {
     return this.prisma.cruise.findUnique({ where: { id: cruiseId }, select: { status: true } });
   }
 
+  /** So o organizerId — usado pra checar cupom escopado a organizador (ver CouponPolicy.validate / ADR-0020). */
+  findCruiseOrganizerId(cruiseId: string): Promise<{ organizerId: string } | null> {
+    return this.prisma.cruise.findUnique({ where: { id: cruiseId }, select: { organizerId: true } });
+  }
+
   findCruiseBySlug(slug: string) {
     return this.prisma.cruise.findUnique({ where: { slug }, select: { id: true, status: true } });
   }
@@ -186,7 +191,7 @@ export class BookingsRepository {
       include: { applicableCruises: { select: { cruiseId: true } } },
     });
     if (!coupon) return null;
-    const { applicableCruises, organizerId: _organizerId, createdAt: _createdAt, updatedAt: _updatedAt, ...rest } = coupon;
+    const { applicableCruises, createdAt: _createdAt, updatedAt: _updatedAt, ...rest } = coupon;
     return { ...rest, applicableCruiseIds: applicableCruises.map((c) => c.cruiseId) };
   }
 
@@ -202,7 +207,7 @@ export class BookingsRepository {
       include: { applicableCruises: { select: { cruiseId: true } } },
     });
     if (!coupon) return null;
-    const { applicableCruises, organizerId: _organizerId, createdAt: _createdAt, updatedAt: _updatedAt, ...rest } = coupon;
+    const { applicableCruises, createdAt: _createdAt, updatedAt: _updatedAt, ...rest } = coupon;
     return { ...rest, applicableCruiseIds: applicableCruises.map((c) => c.cruiseId) };
   }
 
