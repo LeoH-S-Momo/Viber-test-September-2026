@@ -20,6 +20,7 @@ import {
   type GatewayOutcome,
   type PaymentGateway,
 } from '../../payments/domain/payment-gateway';
+import { TicketsService } from '../../tickets/application/tickets.service';
 import { BookingsRepository } from '../persistence/bookings.repository';
 
 export interface GuestDetailInput {
@@ -52,6 +53,7 @@ export class BookingsService {
     private readonly bookingsRepository: BookingsRepository,
     private readonly configService: ConfigService,
     @Inject(PAYMENT_GATEWAY) private readonly paymentGateway: PaymentGateway,
+    private readonly ticketsService: TicketsService,
     @InjectQueue(CABIN_HOLD_EXPIRATION_QUEUE) private readonly holdExpirationQueue: Queue,
     @InjectQueue(TICKET_ISSUANCE_QUEUE) private readonly ticketIssuanceQueue: Queue,
   ) {}
@@ -271,12 +273,22 @@ export class BookingsService {
   async checkout(bookingId: string, userId: string, paymentMethod: PaymentMethod, idempotencyKey?: string) {
     const now = new Date();
 
-    const { payment } = await this.prisma.$transaction(async (tx) => {
+    const prepared = await this.prisma.$transaction(async (tx) => {
       const locked = await this.bookingsRepository.lockBookingForUpdate(tx, bookingId);
       if (!locked) {
         throw new NotFoundException('Reserva nao encontrada.');
       }
       BookingLifecyclePolicy.assertOwnership(locked, userId);
+
+      if (locked.status === BookingStatus.CONFIRMED) {
+        // Idempotente, nunca um erro: outra tentativa verdadeiramente concorrente com a MESMA
+        // Idempotency-Key pode ter travado a linha, criado o pagamento, chamado o gateway E
+        // confirmado a reserva inteira ANTES desta requisicao sequer conseguir a sua vez do lock
+        // (ver check-in/checkout-payment-gateway.e2e-spec.ts, "N truly concurrent" — foi assim
+        // que este caso foi encontrado: `assertCanCheckout` rejeitava com 409 por engano aqui).
+        const current = await tx.booking.findUniqueOrThrow({ where: { id: bookingId } });
+        return { alreadyConfirmed: current };
+      }
 
       let existingPayment: { id: string; method: PaymentMethod } | null = null;
 
@@ -325,6 +337,11 @@ export class BookingsService {
       });
       return { payment };
     });
+
+    if ('alreadyConfirmed' in prepared) {
+      return prepared.alreadyConfirmed;
+    }
+    const { payment } = prepared;
 
     const { chargeResult, timedOut } = await this.callGateway(payment, paymentMethod, idempotencyKey);
 
@@ -382,11 +399,16 @@ export class BookingsService {
       }
       BookingLifecyclePolicy.assertOwnership(locked, userId);
       BookingLifecyclePolicy.assertCanCancel(locked);
-      return this.bookingsRepository.updateStatus(tx, bookingId, {
+      const cancelled = await this.bookingsRepository.updateStatus(tx, bookingId, {
         status: BookingStatus.CANCELLED,
         cancelledAt: new Date(),
         cancellationReason: reason?.trim() || 'Cancelada pelo usuario.',
       });
+      // Uma reserva CONFIRMED pode ja ter tickets emitidos (ver ADR-0012/0013) — cancelar a
+      // reserva precisa invalidar tambem os tickets, senao eles continuariam ISSUED e passariam
+      // no check-in mesmo com a reserva cancelada. No-op (0 linhas) se nunca chegou a CONFIRMED.
+      await this.ticketsService.cancelTicketsForBooking(tx, bookingId);
+      return cancelled;
     });
 
     await this.cancelScheduledExpiration(booking.id);

@@ -652,4 +652,63 @@ de pagamento como um caso de verdade, não um detalhe — a mesma disciplina des
 concorrência com `Promise.all` real, nunca simular) foi o que revelou o bug de corrida acima, que
 uma suíte só com chamadas sequenciais jamais teria pego.
 
+## 2026-09-04 — Ingresso digital e check-in (Staff) + primeira autenticação no frontend
+
+**O quê:** implementado o módulo de check-in completo — código seguro, QR Code gerado sob demanda,
+os quatro estados (`NOT_CHECKED_IN`/`CHECKED_IN`/`INVALID`/`ALREADY_USED`), lookup+confirmação em
+duas etapas, uso único garantido sob concorrência real — e, pela primeira vez, autenticação de
+verdade no frontend (`apps/web` só tinha páginas públicas até aqui). Racional completo em
+[ADR-0013](architecture/decisions/0013-digital-ticket-checkin.md).
+
+**`modules/tickets` promovido para camadas** (domain/persistence/application/presentation, mesmo
+padrão de `bookings`/`catalog` — ADR-0006): cresceu de "listar + uma mutação simples" para uma
+máquina de estados com concorrência a proteger, o mesmo limiar que já tinha justificado camadas
+nos outros módulos. O antigo endpoint `/tickets/:id/check-in` (por id interno, sem lock, sem checar
+reserva confirmada) foi substituído por `/check-in/lookup` + `/check-in/confirm` (por código, como
+o Staff de fato opera).
+
+**"Verificar se a reserva está confirmada" nos dois sentidos:** além de checar na hora do check-in,
+`BookingsService.cancelBooking` agora também cancela (na mesma transação) os tickets já emitidos de
+uma reserva `CONFIRMED` que é cancelada depois — sem isso um ticket continuaria `ISSUED` e passaria
+no check-in mesmo com a reserva cancelada.
+
+**Um bug de corrida real, de novo encontrado testando concorrência de verdade:** ao reaproveitar o
+teste de checkout com 6 requisições concorrentes (ADR-0012) lado a lado com o novo teste de 10
+check-ins concorrentes, uma tentativa tardia de `checkout` recebia `409` mesmo já tendo sido
+aprovada por uma tentativa irmã — porque `checkout` faz duas transações com uma chamada de rede no
+meio, e uma tentativa pode completar o ciclo inteiro antes de outra sequer travar a linha pela
+primeira vez. Corrigido tratando `Booking.CONFIRMED` como um caso idempotente explícito logo no
+início do `checkout`, não como um erro de estado — documentado no ADR-0013, não só no código.
+
+**Base de autenticação do frontend:** `AuthProvider` guarda o access token só em memória (nunca
+`localStorage` — o refresh via cookie httpOnly já foi desenhado para não expor token de longa
+duração a XSS, ADR-0005) e tenta renovação silenciosa ao montar. Três páginas novas: `/login`,
+`/ingressos` (passageiro, QR Code renderizado a partir de um data URI gerado pelo backend) e
+`/organizador/check-in` (Staff — busca por código, mostra o estado, confirma).
+
+**Verificação visual de ponta a ponta:** sem `chromium-cli` disponível, usado um script Playwright
+standalone (o `@playwright/test` já instalado em `apps/web`) dirigindo um Chromium real contra os
+dois dev servers — login como passageiro, QR Code renderizado de verdade, logout, login como
+staff, busca de um ticket real, confirmação, nova busca mostrando "já utilizado", código inválido.
+Todas as 6 capturas de tela conferidas visualmente, sem erros de console além dos 401 esperados do
+refresh silencioso antes do primeiro login.
+
+**Testes:** `check-in.policy.spec.ts` e `tickets.service.spec.ts` (unitários) + novo
+`check-in.e2e-spec.ts` (Postgres/Redis reais — emissão automática, fluxo completo, código
+inexistente, reserva cancelada invalida o ticket, isolamento entre organizadores, Staff-only,
+autenticação obrigatória, e 10 tentativas verdadeiramente concorrentes de check-in do mesmo
+ticket). Três testes de integração de etapas anteriores também corrigidos: dependiam de listar
+`/cruises` sem filtro e paginação suficiente, o que ficou genuinamente flaky à medida que mais
+arquivos de teste (rodando em paralelo) criam mais cruzeiros concorrentemente — corrigido
+filtrando por `organizerId`/`q`, escopado a cada teste. Total: 207 testes unitários (+28) e 69
+testes de integração em 9 suítes (+7, o novo arquivo), todos passando de forma consistente em
+execuções repetidas (dado o bug de corrida acima, rodado mais de uma vez de propósito).
+
+**Por quê:** o pedido foi explícito em não confiar no cliente para validação e em garantir uso
+único do ticket — a mesma disciplina desta conversa (testar concorrência de verdade, nunca
+simulada) revelou dois bugs reais nesta etapa (um na leitura composta de `confirmPayment`, outro
+na corrida de `checkout`) que uma suíte mais tímida nunca teria pego, e a verificação visual real
+(não só a suíte automatizada) foi o que confirmou que a interface pedida — "específica para
+operação de check-in" — de fato funciona, não só compila.
+
 <!-- Novas entradas são adicionadas ao final, em ordem cronológica, cada uma com data, "O quê" e "Por quê". -->

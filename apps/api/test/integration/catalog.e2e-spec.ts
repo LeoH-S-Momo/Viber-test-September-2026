@@ -20,6 +20,7 @@ describe('Catalog discovery (integration)', () => {
   let cheapCruiseId: string;
   let expensiveCruiseId: string;
   let draftCruiseId: string;
+  let organizerId: string;
   let portA: { id: string; name: string };
   let portB: { id: string; name: string };
   let shipId: string;
@@ -45,6 +46,7 @@ describe('Catalog discovery (integration)', () => {
       .expect(201);
     const token = register.body.accessToken as string;
     const auth = { Authorization: `Bearer ${token}` };
+    organizerId = register.body.user.roles[0].organizerId;
 
     portA = await prisma.port.create({ data: { name: `Porto A ${label}`, country: 'Brasil' } });
     portB = await prisma.port.create({ data: { name: `Porto B ${label}`, country: 'Brasil' } });
@@ -172,7 +174,8 @@ describe('Catalog discovery (integration)', () => {
   });
 
   it('never returns a DRAFT cruise on the public catalog', async () => {
-    const res = await request(server()).get('/cruises?pageSize=100').expect(200);
+    // organizerId escopa a este teste — ver comentario em "sorts by price ascending and descending".
+    const res = await request(server()).get(`/cruises?pageSize=100&organizerId=${organizerId}`).expect(200);
     const ids = res.body.data.map((c: { id: string }) => c.id);
 
     expect(ids).toContain(cheapCruiseId);
@@ -187,7 +190,7 @@ describe('Catalog discovery (integration)', () => {
 
   it('filters by price range', async () => {
     const res = await request(server())
-      .get('/cruises?minPrice=1000&maxPrice=10000&pageSize=100')
+      .get(`/cruises?minPrice=1000&maxPrice=10000&pageSize=100&organizerId=${organizerId}`)
       .expect(200);
     const ids = res.body.data.map((c: { id: string }) => c.id);
 
@@ -207,7 +210,9 @@ describe('Catalog discovery (integration)', () => {
 
   it('filters by embarkation period', async () => {
     const res = await request(server())
-      .get('/cruises?embarkationFrom=2027-10-15T00:00:00Z&embarkationTo=2027-11-15T00:00:00Z&pageSize=100')
+      .get(
+        `/cruises?embarkationFrom=2027-10-15T00:00:00Z&embarkationTo=2027-11-15T00:00:00Z&pageSize=100&organizerId=${organizerId}`,
+      )
       .expect(200);
     const ids = res.body.data.map((c: { id: string }) => c.id);
 
@@ -216,14 +221,17 @@ describe('Catalog discovery (integration)', () => {
   });
 
   it('sorts by price ascending and descending', async () => {
+    // Filtra por organizerId (escopado a este teste) em vez de listar sem filtro: com varios
+    // arquivos de integracao rodando em paralelo (cada um cria/publica seus proprios cruzeiros),
+    // a paginacao padrao poderia nao conter os dois cruzeiros deste teste especifico.
     const asc = await request(server())
-      .get('/cruises?sortBy=price&sortOrder=asc&pageSize=100')
+      .get(`/cruises?sortBy=price&sortOrder=asc&pageSize=100&organizerId=${organizerId}`)
       .expect(200);
     const ascIds = asc.body.data.map((c: { id: string }) => c.id);
     expect(ascIds.indexOf(cheapCruiseId)).toBeLessThan(ascIds.indexOf(expensiveCruiseId));
 
     const desc = await request(server())
-      .get('/cruises?sortBy=price&sortOrder=desc&pageSize=100')
+      .get(`/cruises?sortBy=price&sortOrder=desc&pageSize=100&organizerId=${organizerId}`)
       .expect(200);
     const descIds = desc.body.data.map((c: { id: string }) => c.id);
     expect(descIds.indexOf(expensiveCruiseId)).toBeLessThan(descIds.indexOf(cheapCruiseId));

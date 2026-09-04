@@ -103,12 +103,13 @@ describe('RBAC (integration)', () => {
       .send({ name: 'Interna', maxOccupancy: 2 })
       .expect(201);
 
+    const cruiseTitle = `Cruzeiro ${unique('cruise')}`;
     const createCruise = await request(server())
       .post('/cruises')
       .set('Authorization', `Bearer ${orgA.accessToken}`)
       .send({
         shipId,
-        title: `Cruzeiro ${unique('cruise')}`,
+        title: cruiseTitle,
         theme: 'Teste',
         embarkationDate: '2027-05-01T12:00:00Z',
         disembarkationDate: '2027-05-05T12:00:00Z',
@@ -171,7 +172,12 @@ describe('RBAC (integration)', () => {
 
     // O catalogo publico mostra o cruzeiro publicado, mas nao aparece para quem nao esta logado
     // como se fosse de outro organizador — so confirma que esta visivel e com o preco certo.
-    const publicList = await request(server()).get('/cruises').expect(200);
+    // Filtra por `q` (busca livre pelo titulo, unico por teste) em vez de listar sem filtro: com
+    // varios arquivos de integracao rodando em paralelo (cada um cria/publica seus proprios
+    // cruzeiros), a paginacao padrao (20 por pagina) pode nao conter este cruzeiro especifico.
+    const publicList = await request(server())
+      .get(`/cruises?q=${encodeURIComponent(cruiseTitle)}`)
+      .expect(200);
     const found = publicList.body.data.find((c: { id: string }) => c.id === cruiseId);
     expect(found).toBeDefined();
     expect(found.cabinPricings[0].price).toBe('1500');

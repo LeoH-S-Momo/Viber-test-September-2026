@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import { Inter, Plus_Jakarta_Sans } from 'next/font/google';
+import { AuthProvider } from '@/lib/auth-context';
 import { SiteFooter } from '@/components/site-footer';
 import { SiteHeader } from '@/components/site-header';
 import './globals.css';
@@ -37,11 +38,13 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         >
           Pular para o conteúdo principal
         </a>
-        <SiteHeader />
-        <main id="conteudo-principal" className="flex-1">
-          {children}
-        </main>
-        <SiteFooter />
+        <AuthProvider>
+          <SiteHeader />
+          <main id="conteudo-principal" className="flex-1">
+            {children}
+          </main>
+          <SiteFooter />
+        </AuthProvider>
       </body>
     </html>
   );

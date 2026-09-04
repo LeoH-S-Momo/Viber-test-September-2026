@@ -1,7 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import type { Job } from 'bullmq';
-import { TicketsService } from '../modules/tickets/tickets.service';
+import { TicketsService } from '../modules/tickets/application/tickets.service';
 import { TICKET_ISSUANCE_QUEUE, type TicketIssuanceJobData } from './ticket-issuance-queue';
 
 /**

@@ -58,6 +58,7 @@ function buildService() {
   const prisma = { $transaction: jest.fn((callback: (tx: unknown) => unknown) => callback(tx)) };
   const configService = { getOrThrow: jest.fn().mockReturnValue(15) };
   const paymentGateway = { charge: jest.fn(), retrieve: jest.fn() };
+  const ticketsService = { cancelTicketsForBooking: jest.fn() };
   const holdExpirationQueue = { add: jest.fn(), remove: jest.fn() };
   const ticketIssuanceQueue = { add: jest.fn(), remove: jest.fn() };
 
@@ -66,11 +67,22 @@ function buildService() {
     bookingsRepository as never,
     configService as never,
     paymentGateway as never,
+    ticketsService as never,
     holdExpirationQueue as never,
     ticketIssuanceQueue as never,
   );
 
-  return { service, bookingsRepository, prisma, tx, configService, paymentGateway, holdExpirationQueue, ticketIssuanceQueue };
+  return {
+    service,
+    bookingsRepository,
+    prisma,
+    tx,
+    configService,
+    paymentGateway,
+    ticketsService,
+    holdExpirationQueue,
+    ticketIssuanceQueue,
+  };
 }
 
 describe('BookingsService', () => {
@@ -381,6 +393,23 @@ describe('BookingsService', () => {
       paymentGateway.charge.mockRejectedValue(new Error('gateway explodiu'));
 
       await expect(service.checkout('booking-1', 'user-1', 'CREDIT_CARD')).rejects.toThrow('gateway explodiu');
+    });
+
+    it('returns the current booking (idempotent, no error) when a truly concurrent twin request already confirmed it before this one acquired the lock', async () => {
+      // Regressao real, encontrada por check-in/checkout-payment-gateway.e2e-spec.ts com 6/10
+      // requisicoes verdadeiramente concorrentes (Promise.all): quando o pedido chega tarde
+      // demais (o gemeo concorrente ja completou hold->pagamento->gateway->CONFIRMED inteiro
+      // antes deste sequer travar a linha), `locked.status` e CONFIRMED — cair no branch HELD
+      // (`assertCanCheckout`) rejeitava com 409 por engano em vez de tratar como idempotente.
+      const { service, bookingsRepository, tx, paymentGateway } = buildService();
+      bookingsRepository.lockBookingForUpdate.mockResolvedValue({ ...HELD_BOOKING, status: BookingStatus.CONFIRMED });
+      tx.booking.findUniqueOrThrow.mockResolvedValue({ id: 'booking-1', status: BookingStatus.CONFIRMED });
+
+      const result = await service.checkout('booking-1', 'user-1', 'CREDIT_CARD');
+
+      expect(result).toMatchObject({ status: BookingStatus.CONFIRMED });
+      expect(bookingsRepository.createPayment).not.toHaveBeenCalled();
+      expect(paymentGateway.charge).not.toHaveBeenCalled();
     });
   });
 

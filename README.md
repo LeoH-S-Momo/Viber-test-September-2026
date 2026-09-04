@@ -247,18 +247,48 @@ curl -s -X POST localhost:3333/bookings/$BOOKING/checkout -H "Authorization: Bea
   -H "Content-Type: application/json" -d '{"paymentMethod":"PIX"}'
 ```
 
+## Ingresso digital e check-in
+
+Ao confirmar, um `Ticket` é emitido por hóspede (código seguro via `crypto.randomUUID()`, QR Code
+gerado sob demanda pela API — nunca persistido). `GET /tickets/me` devolve o ingresso com o QR já
+pronto (`qrCodeDataUrl`), exibido em `/ingressos` (frontend do passageiro). O módulo de check-in do
+Staff é por código, em duas etapas: `POST /check-in/lookup` (consulta, mostra o ticket e o estado
+antes de qualquer mutação) e `POST /check-in/confirm` (a mutação — trava a linha do ticket, nunca
+permite uso duplo, mesmo sob N confirmações verdadeiramente concorrentes). Quatro estados:
+`NOT_CHECKED_IN`, `CHECKED_IN`, `INVALID` (código inexistente, reserva não confirmada ou ticket
+cancelado) e `ALREADY_USED`. Interface dedicada em `/organizador/check-in` (Staff/Admin do
+organizador). Racional completo em
+[ADR-0013](docs/architecture/decisions/0013-digital-ticket-checkin.md).
+
+```bash
+curl -s -X POST localhost:3333/check-in/lookup -H "Authorization: Bearer $STAFF_TOKEN" \
+  -H "Content-Type: application/json" -d '{"code":"TICKET-..."}'
+curl -s -X POST localhost:3333/check-in/confirm -H "Authorization: Bearer $STAFF_TOKEN" \
+  -H "Content-Type: application/json" -d '{"code":"TICKET-...","location":"Portão A"}'
+```
+
+### Login no frontend
+
+`/login` autentica qualquer papel (passageiro, staff, admin) e redireciona para a área certa. O
+access token vive só em memória (nunca `localStorage`) — a sessão é restaurada entre recarregamentos
+via renovação silenciosa contra o cookie httpOnly de refresh (ver ADR-0005/0013), não por storage
+persistente no browser.
+
 ## Status
 
 Fase atual: bootstrap do monorepo, camada de persistência, autenticação/autorização, módulo de
 catálogo, frontend público, mapa interativo do navio, motor de disponibilidade de cabine, domínio
-de Booking, motor de preços e checkout completo concluídos — frontend e backend sobem localmente,
-banco modelado (30 tabelas) e migrado, seed de demonstração funcionando, auth completa (cadastro,
-login, refresh com rotação, logout, recuperação de senha) com RBAC por papel e por posse de
-recurso, catálogo completo (12 entidades, cruzeiros com publish/unpublish/filtros/paginação/
-ordenação), frontend público (Home, exploração, detalhe, mapa do navio) integrado à API real, hold
-de cabine com garantia real contra concorrência, reserva completa (hóspedes, adicionais, preço com
-desconto/taxa), checkout via `PaymentGateway` simulado (aprovação/recusa/timeout/retry tratados,
-idempotência testada com corridas reais) e emissão assíncrona de ingresso digital, health check e
-documentação de API no ar. Gateway de pagamento real (Stripe/Mercado Pago de verdade) e
-notificações continuam fora de escopo. Ver `docs/DEVLOG.md` para o histórico e
-`docs/product/BACKLOG.md` para o roadmap priorizado.
+de Booking, motor de preços, checkout completo e ingresso digital com check-in concluídos —
+frontend e backend sobem localmente, banco modelado (30 tabelas) e migrado, seed de demonstração
+funcionando, auth completa (cadastro, login, refresh com rotação, logout, recuperação de senha) com
+RBAC por papel e por posse de recurso — agora também com login funcional no frontend (`/login`,
+sessão via refresh silencioso, sem token em storage persistente) —, catálogo completo (12
+entidades, cruzeiros com publish/unpublish/filtros/paginação/ordenação), frontend público (Home,
+exploração, detalhe, mapa do navio) integrado à API real, hold de cabine com garantia real contra
+concorrência, reserva completa (hóspedes, adicionais, preço com desconto/taxa), checkout via
+`PaymentGateway` simulado (aprovação/recusa/timeout/retry tratados, idempotência testada com
+corridas reais), ingresso digital com QR Code e check-in do Staff por código (uso único garantido
+sob concorrência real, interface dedicada em `/organizador/check-in`, verificada em navegador de
+verdade), health check e documentação de API no ar. Gateway de pagamento real (Stripe/Mercado Pago
+de verdade), leitura de QR Code por câmera e notificações continuam fora de escopo. Ver
+`docs/DEVLOG.md` para o histórico e `docs/product/BACKLOG.md` para o roadmap priorizado.

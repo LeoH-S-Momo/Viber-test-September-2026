@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { Compass, Waves } from 'lucide-react';
+import { AuthNav } from './auth-nav';
 
 export function SiteHeader() {
   return (
@@ -23,6 +24,7 @@ export function SiteHeader() {
             <Compass className="h-4 w-4" aria-hidden="true" />
             Explorar cruzeiros
           </Link>
+          <AuthNav />
         </nav>
       </div>
     </header>
