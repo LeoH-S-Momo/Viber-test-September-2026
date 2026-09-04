@@ -48,6 +48,7 @@ const CRUISE_SUMMARY_SELECT = {
   coverImageUrl: true,
   embarkationDate: true,
   disembarkationDate: true,
+  shipId: true,
   ship: { select: { name: true } },
   organizer: { select: { id: true, name: true } },
   embarkationPort: { select: { name: true, country: true } },
@@ -177,6 +178,11 @@ export class CruisesRepository {
 
   findById(id: string) {
     return this.prisma.cruise.findUnique({ where: { id } });
+  }
+
+  /** Mesmo detalhe rico de `findBySlug`, por id e em QUALQUER status — usado pelo formulario de edicao do organizador. */
+  findByIdWithDetail(id: string) {
+    return this.prisma.cruise.findUnique({ where: { id }, include: CRUISE_DETAIL_INCLUDE });
   }
 
   findPublishReadiness(id: string) {

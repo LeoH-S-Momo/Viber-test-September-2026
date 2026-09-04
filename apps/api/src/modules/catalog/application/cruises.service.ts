@@ -60,6 +60,12 @@ export class CruisesService {
     return cruise;
   }
 
+  /** Detalhe rico (mesmo shape da pagina publica), pra alimentar o formulario de edicao — em qualquer status. */
+  async findByIdForOrganizerDetailed(organizerId: string, id: string) {
+    await this.findByIdForOrganizer(organizerId, id);
+    return this.cruisesRepository.findByIdWithDetail(id);
+  }
+
   async create(organizerId: string, input: CreateCruiseInput) {
     await this.shipsService.findOwnedByOrganizerOrThrow(organizerId, input.shipId);
 

@@ -16,6 +16,10 @@ export class RestaurantsService {
     return this.restaurantsRepository.findByShip(shipId);
   }
 
+  findManyForOrganizer(organizerId: string) {
+    return this.restaurantsRepository.findManyForOrganizer(organizerId);
+  }
+
   async findById(id: string) {
     const restaurant = await this.restaurantsRepository.findById(id);
     if (!restaurant) {

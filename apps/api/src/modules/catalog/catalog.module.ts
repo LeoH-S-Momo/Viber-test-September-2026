@@ -91,6 +91,6 @@ import { VenuesController } from './presentation/venues.controller';
     EventsService,
     ExperiencesService,
   ],
-  exports: [ShipsService, CruisesService],
+  exports: [ShipsService, CruisesService, EventsService, RestaurantsService, ExperiencesService],
 })
 export class CatalogModule {}

@@ -14,6 +14,15 @@ export class RestaurantsRepository {
     });
   }
 
+  /** Painel do organizador — todos os restaurantes de todos os navios do organizador (ver ADR-0016). */
+  findManyForOrganizer(organizerId: string) {
+    return this.prisma.restaurant.findMany({
+      where: { ship: { organizerId } },
+      orderBy: { name: 'asc' },
+      include: { diningSlots: true, ship: { select: { id: true, name: true } } },
+    });
+  }
+
   findById(id: string) {
     return this.prisma.restaurant.findUnique({
       where: { id },

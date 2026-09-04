@@ -123,6 +123,7 @@ export interface CruiseSummary {
   coverImageUrl: string | null;
   embarkationDate: string;
   disembarkationDate: string;
+  shipId: string;
   ship: { name: string };
   organizer: CruiseOrganizer;
   embarkationPort: { name: string; country: string } | null;

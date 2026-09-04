@@ -14,6 +14,13 @@ export class ExperiencesService {
     return this.experiencesRepository.findByCruise(cruiseId);
   }
 
+  async findManyForOrganizer(organizerId: string, cruiseId?: string) {
+    if (cruiseId) {
+      await this.cruisesService.findByIdForOrganizer(organizerId, cruiseId);
+    }
+    return this.experiencesRepository.findManyForOrganizer(organizerId, cruiseId);
+  }
+
   async findById(id: string) {
     const experience = await this.experiencesRepository.findById(id);
     if (!experience) {

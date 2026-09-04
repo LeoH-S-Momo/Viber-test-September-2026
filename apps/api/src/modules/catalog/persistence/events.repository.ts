@@ -14,6 +14,15 @@ export class EventsRepository {
     });
   }
 
+  /** Painel do organizador — SEMPRE filtra por `cruise.organizerId`, nunca so por `cruiseId` (ver ADR-0016). */
+  findManyForOrganizer(organizerId: string, cruiseId?: string) {
+    return this.prisma.event.findMany({
+      where: { cruise: { organizerId }, ...(cruiseId ? { cruiseId } : {}) },
+      orderBy: { startAt: 'asc' },
+      include: { venue: true, artist: true, cruise: { select: { id: true, title: true } } },
+    });
+  }
+
   findById(id: string) {
     return this.prisma.event.findUnique({
       where: { id },

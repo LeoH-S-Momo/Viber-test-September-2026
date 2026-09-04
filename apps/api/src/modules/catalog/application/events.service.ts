@@ -16,6 +16,13 @@ export class EventsService {
     return this.eventsRepository.findMany(query);
   }
 
+  async findManyForOrganizer(organizerId: string, cruiseId?: string) {
+    if (cruiseId) {
+      await this.cruisesService.findByIdForOrganizer(organizerId, cruiseId);
+    }
+    return this.eventsRepository.findManyForOrganizer(organizerId, cruiseId);
+  }
+
   async findById(id: string) {
     const event = await this.eventsRepository.findById(id);
     if (!event) {

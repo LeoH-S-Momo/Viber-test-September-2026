@@ -10,6 +10,15 @@ export class ExperiencesRepository {
     return this.prisma.experience.findMany({ where: { cruiseId }, orderBy: { title: 'asc' } });
   }
 
+  /** Painel do organizador — SEMPRE filtra por `cruise.organizerId` (ver ADR-0016). */
+  findManyForOrganizer(organizerId: string, cruiseId?: string) {
+    return this.prisma.experience.findMany({
+      where: { cruise: { organizerId }, ...(cruiseId ? { cruiseId } : {}) },
+      orderBy: { title: 'asc' },
+      include: { cruise: { select: { id: true, title: true } } },
+    });
+  }
+
   findById(id: string) {
     return this.prisma.experience.findUnique({
       where: { id },
