@@ -111,6 +111,12 @@ enum TicketStatus {
   CANCELLED
 }
 
+/// Reserva de atividade de bordo (evento ou horario de restaurante) — ver ADR-0014.
+enum ActivityReservationStatus {
+  CONFIRMED
+  CANCELLED
+}
+
 enum CouponDiscountType {
   PERCENTAGE
   FIXED_AMOUNT
@@ -513,6 +519,8 @@ model Event {
   venue  Venue   @relation(fields: [venueId], references: [id], onDelete: Restrict)
   artist Artist? @relation(fields: [artistId], references: [id], onDelete: SetNull)
 
+  reservations EventReservation[]
+
   @@index([cruiseId])
   @@index([venueId])
   @@index([artistId])
@@ -557,6 +565,8 @@ model DiningSlot {
 
   restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
 
+  reservations DiningReservation[]
+
   @@unique([restaurantId, label])
   @@map("dining_slots")
 }
@@ -568,16 +578,19 @@ model DiningSlot {
 /// Experiencia paga/inclusa vinculada ao cruzeiro (tour, aula, degustacao) —
 /// distinta de Event (que tem local/horario fixo a bordo tipo show).
 model Experience {
-  id          String   @id @default(cuid())
-  cruiseId    String
-  title       String
-  description String?
-  category    String?
-  price       Decimal? @db.Decimal(10, 2)
-  capacity    Int?
-  isIncluded  Boolean  @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id              String   @id @default(cuid())
+  cruiseId        String
+  title           String
+  description     String?
+  category        String?
+  price           Decimal? @db.Decimal(10, 2)
+  /// Vagas totais — null = sem limite. Aplicado em BookingsService.updateDetails (ver ADR-0014):
+  /// soma de BookingExperience.partySize de reservas ativas nunca pode ultrapassar isto.
+  capacity        Int?
+  durationMinutes Int?
+  isIncluded      Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   cruise Cruise @relation(fields: [cruiseId], references: [id], onDelete: Cascade)
 
@@ -631,10 +644,12 @@ model Booking {
   cabin  Cabin   @relation(fields: [cabinId], references: [id], onDelete: Restrict)
   coupon Coupon? @relation(fields: [couponId], references: [id], onDelete: SetNull)
 
-  guests        BookingGuest[]
-  experiences   BookingExperience[]
-  payments      Payment[]
-  notifications Notification[]
+  guests             BookingGuest[]
+  experiences        BookingExperience[]
+  eventReservations  EventReservation[]
+  diningReservations DiningReservation[]
+  payments           Payment[]
+  notifications      Notification[]
 
   @@unique([userId, idempotencyKey])
   @@index([cruiseId])
@@ -651,6 +666,10 @@ model BookingExperience {
   bookingId      String
   experienceId   String
   priceAtBooking Decimal  @db.Decimal(10, 2)
+  /// Quantas pessoas da reserva participam — congelado no momento da selecao (igual
+  /// priceAtBooking), computado do numero de hospedes informados na mesma chamada de
+  /// updateDetails (nunca um valor enviado pelo cliente). Ver ADR-0014.
+  partySize      Int      @default(1)
   createdAt      DateTime @default(now())
 
   booking    Booking    @relation(fields: [bookingId], references: [id], onDelete: Cascade)
@@ -658,6 +677,62 @@ model BookingExperience {
 
   @@unique([bookingId, experienceId])
   @@map("booking_experiences")
+}
+
+// ============================================================================
+// EXPERIENCIA INTERNA DO CRUZEIRO — RESERVA DE EVENTOS E RESTAURANTES
+// ============================================================================
+// Ver ADR-0014. Mesmo principio de overbooking do motor de hold de cabine
+// (ADR-0009): trava a linha do recurso compartilhado (Event/DiningSlot) com
+// `SELECT ... FOR UPDATE`, soma as reservas ativas, so entao decide — nunca
+// uma constraint de banco sozinha (capacidade e uma soma, nao uma unicidade).
+
+/// Reserva de um hospede/reserva de cabine (`Booking`) para um `Event` especifico — no maximo uma
+/// linha ativa por par (evento, reserva): reenviar e idempotente (PUT), nao duplica.
+model EventReservation {
+  id          String                     @id @default(cuid())
+  eventId     String
+  bookingId   String
+  /// Quantas pessoas da reserva vao — nunca ultrapassa Event.capacity somado as outras reservas.
+  partySize   Int
+  status      ActivityReservationStatus @default(CONFIRMED)
+  cancelledAt DateTime?
+  createdAt   DateTime                   @default(now())
+  updatedAt   DateTime                   @updatedAt
+
+  event   Event   @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, bookingId])
+  @@index([eventId])
+  @@index([bookingId])
+  @@map("event_reservations")
+}
+
+/// Reserva de mesa numa data especifica da viagem — `DiningSlot` e um horario RECORRENTE
+/// (label + startTime/endTime), a reserva de verdade precisa dizer PARA QUAL DIA (ver
+/// ActivitySchedulingPolicy — a mesma janela recorrente pode ter reservas em dias diferentes).
+model DiningReservation {
+  id              String                     @id @default(cuid())
+  diningSlotId    String
+  bookingId       String
+  /// Numero de pessoas da mesa — nunca ultrapassa DiningSlot.capacity somado as outras reservas
+  /// da MESMA data.
+  partySize       Int
+  /// So a data (sem hora) — o horario vem do DiningSlot. Validado contra o periodo do cruzeiro.
+  reservationDate DateTime                   @db.Date
+  status          ActivityReservationStatus @default(CONFIRMED)
+  cancelledAt     DateTime?
+  createdAt       DateTime                   @default(now())
+  updatedAt       DateTime                   @updatedAt
+
+  diningSlot DiningSlot @relation(fields: [diningSlotId], references: [id], onDelete: Cascade)
+  booking    Booking    @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@unique([diningSlotId, bookingId, reservationDate])
+  @@index([diningSlotId, reservationDate])
+  @@index([bookingId])
+  @@map("dining_reservations")
 }
 
 model BookingGuest {

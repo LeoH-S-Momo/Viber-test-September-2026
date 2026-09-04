@@ -711,4 +711,69 @@ na corrida de `checkout`) que uma suíte mais tímida nunca teria pego, e a veri
 (não só a suíte automatizada) foi o que confirmou que a interface pedida — "específica para
 operação de check-in" — de fato funciona, não só compila.
 
+## 2026-09-04 — Experiência interna do cruzeiro: reserva de eventos e restaurantes
+
+**O quê:** implementado o módulo `modules/activities` — passageiros com reserva `CONFIRMED` agora
+conseguem reservar eventos e horários de restaurante para a própria viagem, com proteção real
+contra overbooking (capacidade) e contra conflito de horário na agenda do próprio passageiro.
+Racional completo em [ADR-0014](architecture/decisions/0014-onboard-activity-reservations.md).
+
+**Schema:** `EventReservation`/`DiningReservation` novos (status, `partySize`, restrições de
+unicidade compostas por reserva); `BookingExperience.partySize` novo (congelado no momento da
+seleção, mesmo padrão de `priceAtBooking` — ADR-0010); `Event.durationMinutes` novo.
+
+**Overbooking evitado com o mesmo princípio de sempre:** `SELECT ... FOR UPDATE` no `Event`/
+`DiningSlot` antes de somar `partySize` das reservas ativas e decidir (`ActivityCapacityPolicy`) —
+a mesma estratégia de ADR-0009/0010/0012/0013, agora também estendida para `Experience.capacity`
+dentro de `BookingsService.updateDetails` (travando todas as experiências selecionadas em ordem
+estável de id, para não gerar deadlock entre chamadas concorrentes que se sobrepõem).
+
+**Conflito de horário como política própria, separada de capacidade:**
+`ActivitySchedulingPolicy` faz o teste clássico de sobreposição de intervalos contra a agenda já
+confirmada da mesma reserva (eventos + restaurantes juntos); bordas que só se tocam não contam
+como conflito, de propósito. Um `DiningSlot` recorrente (`@db.Time`, sem data) vira uma janela
+absoluta comparável via `diningSlotWindowOn`, com tratamento do caso de atravessar meia-noite.
+
+**Reservas são "criar + cancelar explícito", não "editar in-place":** reenviar a mesma reserva é
+um retry idempotente; mudar o `partySize` de uma reserva já `CONFIRMED` exige cancelar e reservar
+de novo — decisão deliberada para não precisar excluir "a reserva anterior de si mesma" das
+consultas de capacidade e de conflito.
+
+**Frontend — `/reservas`, "Minha viagem":** primeira página a juntar leitura autenticada
+(`GET /bookings/me`) com o catálogo público já existente (`getCruiseBySlug`, que já trazia
+eventos/restaurantes/horários — nenhuma rota nova de leitura de catálogo foi necessária). Mostra a
+cabine, hóspedes, experiências já selecionadas (somente leitura) e duas listas com formulário de
+adicionar + cancelar por item. Link "Minha viagem" adicionado à navegação do passageiro.
+
+**Verificação:** dados reais semeados via API (organizador, navio, evento, restaurante, passageiro
+com reserva confirmada) e um script Playwright standalone dirigindo um Chromium real contra os dois
+dev servers — reserva de evento, reserva de restaurante, cancelamento (com a vaga voltando a
+aparecer no formulário), e uma rejeição de conflito real (mesmo horário/data com `partySize`
+diferente) exibida como erro na UI. Todas as 5 capturas de tela conferidas visualmente.
+
+**Um teste de concorrência que só falhava por causa do ambiente, não do código:** os dois testes de
+overbooking sob concorrência real (`Promise.all` verdadeiro) apresentaram `ECONNRESET`
+intermitente ao criar dezenas de conexões HTTP `connection: close` simultâneas no loopback do
+Windows durante o *setup* de cada teste (N reservas `CONFIRMED` distintas antes do burst de
+verdade) — não na lógica sob teste, confirmado isolando cada teste e trocando qual dos dois "ia
+primeiro" (o que falhava mudava, nunca os dois ao mesmo tempo). Corrigido criando as reservas de
+setup **sequencialmente** e mantendo só o burst final de reservas de atividade — o que de fato
+precisa ser concorrente — como `Promise.all`; estável em execuções repetidas depois disso.
+
+**Testes:** `activity-capacity.policy.spec.ts`, `activity-scheduling.policy.spec.ts`,
+`dining-schedule.util.spec.ts`, `activities.service.spec.ts` (unitários, repositório mockado) +
+extensão de `bookings.service.spec.ts` para a capacidade de `Experience` + novo
+`activities.e2e-spec.ts` (Postgres/Redis reais — reserva e cancelamento completos, ownership,
+cruzeiro errado, retry idempotente, mudança de `partySize` rejeitada, overbooking sob concorrência
+real para eventos E restaurantes, data fora do período do cruzeiro, capacidade por data de um
+`DiningSlot`, conflito de horário evento×restaurante incluindo o caso de borda que não é conflito,
+CRUD de `DiningSlot` restrito ao organizador dono do navio). Total: 248 testes unitários (+41) e 84
+testes de integração em 10 suítes (+15, o novo arquivo), todos passando de forma consistente.
+
+**Por quê:** o pedido foi explícito em não permitir que uma atividade ultrapasse sua capacidade
+máxima e em testar conflitos de horário e capacidade — a mesma disciplina desta conversa (provar
+concorrência com `Promise.all` real, nunca simular) foi reaplicada aqui, e desta vez revelou uma
+armadilha do próprio ambiente de teste (não um bug de aplicação) que só apareceu por insistir em
+concorrência de verdade em vez de aceitar o primeiro `ECONNRESET` como "só flakiness".
+
 <!-- Novas entradas são adicionadas ao final, em ordem cronológica, cada uma com data, "O quê" e "Por quê". -->

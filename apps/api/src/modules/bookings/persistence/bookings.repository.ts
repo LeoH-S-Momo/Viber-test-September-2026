@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { BookingStatus, CabinStatus, PaymentMethod, PaymentStatus, Prisma } from '@prisma/client';
+import { ActivityReservationStatus, BookingStatus, CabinStatus, PaymentMethod, PaymentStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../database/prisma/prisma.service';
 import type { CouponRecord } from '../../pricing/domain/pricing.types';
 
@@ -46,6 +46,14 @@ export class BookingsRepository {
         cabin: { select: { id: true, code: true, cabinCategory: { select: { name: true, maxOccupancy: true } } } },
         guests: true,
         experiences: { include: { experience: { select: { id: true, title: true } } } },
+        eventReservations: {
+          where: { status: ActivityReservationStatus.CONFIRMED },
+          include: { event: { include: { venue: true, artist: true } } },
+        },
+        diningReservations: {
+          where: { status: ActivityReservationStatus.CONFIRMED },
+          include: { diningSlot: { include: { restaurant: true } } },
+        },
         payments: { orderBy: { createdAt: 'desc' } },
       },
     });
@@ -59,6 +67,14 @@ export class BookingsRepository {
         cabin: { select: { id: true, code: true, cabinCategory: { select: { name: true, maxOccupancy: true } } } },
         guests: true,
         experiences: { include: { experience: { select: { id: true, title: true } } } },
+        eventReservations: {
+          where: { status: ActivityReservationStatus.CONFIRMED },
+          include: { event: { include: { venue: true, artist: true } } },
+        },
+        diningReservations: {
+          where: { status: ActivityReservationStatus.CONFIRMED },
+          include: { diningSlot: { include: { restaurant: true } } },
+        },
         payments: { orderBy: { createdAt: 'desc' } },
         coupon: { select: { code: true } },
       },
@@ -104,6 +120,63 @@ export class BookingsRepository {
     return this.prisma.experience.findMany({
       where: { id: { in: experienceIds }, cruiseId },
     });
+  }
+
+  findExperienceById(experienceId: string) {
+    return this.prisma.experience.findUnique({ where: { id: experienceId } });
+  }
+
+  /** Mesma soma de `sumActiveExperiencePartySize`, fora de uma transacao/lock — so para leitura de disponibilidade. */
+  async sumActiveExperiencePartySizePlain(experienceId: string): Promise<number> {
+    const result = await this.prisma.bookingExperience.aggregate({
+      where: { experienceId, booking: { status: { in: ACTIVE_BOOKING_STATUSES } } },
+      _sum: { partySize: true },
+    });
+    return result._sum.partySize ?? 0;
+  }
+
+  /**
+   * `SELECT ... FOR UPDATE` de todas as Experience selecionadas de uma vez,
+   * em ordem estavel de id — trava multiplos recursos na MESMA ordem em
+   * toda chamada, o que evita deadlock entre duas `updateDetails`
+   * concorrentes que selecionam experiencias sobrepostas em ordem diferente
+   * (ver ADR-0014).
+   */
+  async lockExperiencesForUpdate(
+    tx: Prisma.TransactionClient,
+    experienceIds: string[],
+  ): Promise<Array<{ id: string; capacity: number | null }>> {
+    if (experienceIds.length === 0) return [];
+    const sorted = [...new Set(experienceIds)].sort();
+    return tx.$queryRaw<Array<{ id: string; capacity: number | null }>>(
+      Prisma.sql`SELECT id, capacity FROM experiences WHERE id IN (${Prisma.join(sorted)}) ORDER BY id FOR UPDATE`,
+    );
+  }
+
+  /**
+   * Soma de `BookingExperience.partySize` de reservas ATIVAS (HELD,
+   * PAYMENT_PENDING ou CONFIRMED — as mesmas que ocupam cabine, ver
+   * ACTIVE_BOOKING_STATUSES) para cada experiencia pedida, EXCLUINDO a
+   * propria reserva chamadora: `updateDetails` e um PUT idempotente que
+   * SUBSTITUI as experiencias desta reserva, entao a selecao anterior dela
+   * mesma nao deve contar contra o novo pedido.
+   */
+  async sumActiveExperiencePartySize(
+    tx: Prisma.TransactionClient,
+    experienceIds: string[],
+    excludeBookingId: string,
+  ): Promise<Map<string, number>> {
+    if (experienceIds.length === 0) return new Map();
+    const rows = await tx.bookingExperience.groupBy({
+      by: ['experienceId'],
+      where: {
+        experienceId: { in: experienceIds },
+        bookingId: { not: excludeBookingId },
+        booking: { status: { in: ACTIVE_BOOKING_STATUSES } },
+      },
+      _sum: { partySize: true },
+    });
+    return new Map(rows.map((row) => [row.experienceId, row._sum.partySize ?? 0]));
   }
 
   /** Traduz o cupom (persistencia -> forma achatada do dominio) — ver CouponRecord.applicableCruiseIds. */
@@ -265,7 +338,7 @@ export class BookingsRepository {
         birthDate?: Date;
         isPrimary: boolean;
       }>;
-      experiences: Array<{ experienceId: string; priceAtBooking: Prisma.Decimal }>;
+      experiences: Array<{ experienceId: string; priceAtBooking: Prisma.Decimal; partySize: number }>;
       couponId: string | null;
       pricing: {
         subtotalAmount: Prisma.Decimal;

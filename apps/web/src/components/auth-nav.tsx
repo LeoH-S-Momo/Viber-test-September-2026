@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { LogIn, LogOut, ScanLine, Ticket as TicketIcon } from 'lucide-react';
+import { CalendarCheck, LogIn, LogOut, ScanLine, Ticket as TicketIcon } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 
 /** Ilha client-side no header (que e Server Component) — so aqui a sessao (memoria, ver AuthProvider) e lida. */
@@ -28,6 +28,15 @@ export function AuthNav() {
 
   return (
     <div className="flex items-center gap-1 sm:gap-2">
+      {!isStaff && (
+        <Link
+          href="/reservas"
+          className="flex items-center gap-1.5 rounded-full px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-brand-50 hover:text-brand-800 sm:px-4"
+        >
+          <CalendarCheck className="h-4 w-4" aria-hidden="true" />
+          Minha viagem
+        </Link>
+      )}
       <Link
         href={isStaff ? '/organizador/check-in' : '/ingressos'}
         className="flex items-center gap-1.5 rounded-full px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-brand-50 hover:text-brand-800 sm:px-4"

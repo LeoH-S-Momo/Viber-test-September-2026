@@ -274,21 +274,41 @@ access token vive só em memória (nunca `localStorage`) — a sessão é restau
 via renovação silenciosa contra o cookie httpOnly de refresh (ver ADR-0005/0013), não por storage
 persistente no browser.
 
+## Experiência interna do cruzeiro (eventos, restaurantes, experiências)
+
+Com a reserva já `CONFIRMED`, o passageiro reserva eventos e horários de restaurante para a própria
+viagem em `/reservas` ("Minha viagem"). Overbooking é impedido pelo mesmo princípio de sempre
+(`SELECT ... FOR UPDATE` no recurso disputado antes de somar as reservas ativas e decidir — provado
+sob concorrência real), e conflito de horário na agenda do próprio passageiro é uma política
+separada, independente de capacidade. Racional completo em
+[ADR-0014](docs/architecture/decisions/0014-onboard-activity-reservations.md).
+
+```bash
+# partySize sempre explícito; a reserva precisa estar CONFIRMED.
+curl -s -X POST localhost:3333/bookings/$BOOKING/event-reservations/$EVENT \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"partySize":2}'
+curl -s -X POST localhost:3333/bookings/$BOOKING/dining-reservations \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"diningSlotId":"'"$SLOT"'","partySize":2,"reservationDate":"2027-10-03"}'
+```
+
 ## Status
 
 Fase atual: bootstrap do monorepo, camada de persistência, autenticação/autorização, módulo de
 catálogo, frontend público, mapa interativo do navio, motor de disponibilidade de cabine, domínio
-de Booking, motor de preços, checkout completo e ingresso digital com check-in concluídos —
-frontend e backend sobem localmente, banco modelado (30 tabelas) e migrado, seed de demonstração
-funcionando, auth completa (cadastro, login, refresh com rotação, logout, recuperação de senha) com
-RBAC por papel e por posse de recurso — agora também com login funcional no frontend (`/login`,
-sessão via refresh silencioso, sem token em storage persistente) —, catálogo completo (12
-entidades, cruzeiros com publish/unpublish/filtros/paginação/ordenação), frontend público (Home,
-exploração, detalhe, mapa do navio) integrado à API real, hold de cabine com garantia real contra
-concorrência, reserva completa (hóspedes, adicionais, preço com desconto/taxa), checkout via
+de Booking, motor de preços, checkout completo, ingresso digital com check-in e experiência interna
+do cruzeiro (eventos/restaurantes) concluídos — frontend e backend sobem localmente, banco modelado
+e migrado, seed de demonstração funcionando, auth completa (cadastro, login, refresh com rotação,
+logout, recuperação de senha) com RBAC por papel e por posse de recurso — agora também com login
+funcional no frontend (`/login`, sessão via refresh silencioso, sem token em storage persistente) —,
+catálogo completo (cruzeiros com publish/unpublish/filtros/paginação/ordenação), frontend público
+(Home, exploração, detalhe, mapa do navio) integrado à API real, hold de cabine com garantia real
+contra concorrência, reserva completa (hóspedes, adicionais, preço com desconto/taxa), checkout via
 `PaymentGateway` simulado (aprovação/recusa/timeout/retry tratados, idempotência testada com
 corridas reais), ingresso digital com QR Code e check-in do Staff por código (uso único garantido
-sob concorrência real, interface dedicada em `/organizador/check-in`, verificada em navegador de
-verdade), health check e documentação de API no ar. Gateway de pagamento real (Stripe/Mercado Pago
-de verdade), leitura de QR Code por câmera e notificações continuam fora de escopo. Ver
-`docs/DEVLOG.md` para o histórico e `docs/product/BACKLOG.md` para o roadmap priorizado.
+sob concorrência real, interface dedicada em `/organizador/check-in`), e reserva de eventos/
+restaurantes a bordo com overbooking e conflito de horário impedidos sob concorrência real
+(interface dedicada em `/reservas`, verificada em navegador de verdade), health check e
+documentação de API no ar. Gateway de pagamento real (Stripe/Mercado Pago de verdade), leitura de
+QR Code por câmera e notificações continuam fora de escopo. Ver `docs/DEVLOG.md` para o histórico e
+`docs/product/BACKLOG.md` para o roadmap priorizado.

@@ -10,6 +10,7 @@ import { CABIN_HOLD_EXPIRATION_JOB, CABIN_HOLD_EXPIRATION_QUEUE } from '../../..
 import { TICKET_ISSUANCE_JOB, TICKET_ISSUANCE_QUEUE } from '../../../jobs/ticket-issuance-queue';
 import { BookingGuestsPolicy } from '../domain/booking-guests.policy';
 import { BookingLifecyclePolicy } from '../domain/booking-lifecycle.policy';
+import { ActivityCapacityPolicy } from '../../activities/domain/activity-capacity.policy';
 import { CouponPolicy } from '../../pricing/domain/coupon.policy';
 import { PricingEngine } from '../../pricing/domain/pricing-engine';
 import type { PricingBreakdown } from '../../pricing/domain/pricing.types';
@@ -84,6 +85,24 @@ export class BookingsService {
     }
     const activeBooking = await this.bookingsRepository.findActiveBookingPlain(cabinId, cruise.id);
     return CabinAvailabilityPolicy.resolve(cabin.status, activeBooking ?? undefined);
+  }
+
+  /**
+   * Disponibilidade de uma Experience — mesma soma usada dentro de
+   * `updateDetails`, so que fora de uma transacao/lock (leitura pura, pode
+   * mudar entre a resposta e um `updateDetails` real — ver ADR-0014).
+   */
+  async getExperienceAvailability(experienceId: string) {
+    const experience = await this.bookingsRepository.findExperienceById(experienceId);
+    if (!experience) {
+      throw new NotFoundException('Experiencia nao encontrada.');
+    }
+    const reserved = await this.bookingsRepository.sumActiveExperiencePartySizePlain(experienceId);
+    return {
+      capacity: experience.capacity,
+      reserved,
+      available: experience.capacity === null ? null : experience.capacity - reserved,
+    };
   }
 
   /**
@@ -204,6 +223,30 @@ export class BookingsService {
         throw new ConflictException('Um ou mais adicionais selecionados nao pertencem a este cruzeiro.');
       }
 
+      // Capacidade de cada Experience selecionada — trava as linhas (ordem estavel, evita deadlock
+      // entre updateDetails concorrentes) ANTES de somar quem mais ja reservou, mesmo principio de
+      // ADR-0009/0014. `partySize` e sempre o numero de hospedes desta chamada, nunca um valor do cliente.
+      const partySize = input.guests.length;
+      if (experiences.length > 0) {
+        const lockedExperiences = await this.bookingsRepository.lockExperiencesForUpdate(
+          tx,
+          experiences.map((experience) => experience.id),
+        );
+        const capacityById = new Map(lockedExperiences.map((experience) => [experience.id, experience.capacity]));
+        const alreadyReservedById = await this.bookingsRepository.sumActiveExperiencePartySize(
+          tx,
+          experiences.map((experience) => experience.id),
+          bookingId,
+        );
+        for (const experience of experiences) {
+          ActivityCapacityPolicy.assertHasCapacity({
+            capacity: capacityById.get(experience.id) ?? null,
+            alreadyReserved: alreadyReservedById.get(experience.id) ?? 0,
+            partySize,
+          });
+        }
+      }
+
       const pricing = await this.bookingsRepository.findCruiseCabinPricing(tx, locked.cruiseId, cabin.cabinCategoryId);
       if (!pricing) {
         throw new ConflictException('Esta cabine ainda nao tem preco definido para este cruzeiro.');
@@ -239,6 +282,7 @@ export class BookingsService {
         experiences: experiences.map((experience) => ({
           experienceId: experience.id,
           priceAtBooking: experiencePriceOf(experience),
+          partySize,
         })),
         couponId,
         pricing: breakdown,

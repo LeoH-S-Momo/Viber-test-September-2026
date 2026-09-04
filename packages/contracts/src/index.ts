@@ -17,3 +17,4 @@ export * from './catalog/venue.schema';
 export * from './catalog/restaurant.schema';
 export * from './catalog/itinerary-stop.schema';
 export * from './booking/booking.schema';
+export * from './activity/activity.schema';

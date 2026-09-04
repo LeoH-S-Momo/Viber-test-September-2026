@@ -49,6 +49,12 @@ export class BookingsController {
     return { cabinId, availability };
   }
 
+  @Public()
+  @Get('experiences/:experienceId/availability')
+  experienceAvailability(@Param('experienceId') experienceId: string) {
+    return this.bookingsService.getExperienceAvailability(experienceId);
+  }
+
   /** "Seleciona cabine" / criacao da reserva. `Idempotency-Key` opcional — ver ADR-0010. */
   @ApiBearerAuth()
   @Roles(RoleKey.PASSENGER)

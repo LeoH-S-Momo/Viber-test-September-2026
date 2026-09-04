@@ -32,6 +32,8 @@ function buildService() {
     findCruiseStatus: jest.fn(),
     findCruiseBySlug: jest.fn(),
     findExperiencesByIds: jest.fn().mockResolvedValue([]),
+    lockExperiencesForUpdate: jest.fn().mockResolvedValue([]),
+    sumActiveExperiencePartySize: jest.fn().mockResolvedValue(new Map()),
     findCouponByCode: jest.fn(),
     findCouponById: jest.fn(),
     countUserCouponUsage: jest.fn().mockResolvedValue(0),
@@ -182,10 +184,54 @@ describe('BookingsService', () => {
         'booking-1',
         expect.objectContaining({
           guests,
-          experiences: [{ experienceId: 'exp-1', priceAtBooking: expect.any(Prisma.Decimal) }],
+          experiences: [{ experienceId: 'exp-1', priceAtBooking: expect.any(Prisma.Decimal), partySize: 1 }],
           pricing: expect.objectContaining({ subtotalAmount: expect.any(Prisma.Decimal) }),
         }),
       );
+    });
+
+    it('rejects when an experience is at capacity, locking rows before summing (ADR-0014)', async () => {
+      const { service, bookingsRepository } = buildService();
+      bookingsRepository.lockBookingForUpdate.mockResolvedValue(HELD_BOOKING);
+      bookingsRepository.findCabinWithCategory.mockResolvedValue(CABIN_WITH_CATEGORY);
+      bookingsRepository.findExperiencesByIds.mockResolvedValue([
+        { id: 'exp-1', price: new Prisma.Decimal(150), isIncluded: false },
+      ]);
+      bookingsRepository.lockExperiencesForUpdate.mockResolvedValue([{ id: 'exp-1', capacity: 5 }]);
+      bookingsRepository.sumActiveExperiencePartySize.mockResolvedValue(new Map([['exp-1', 4]]));
+
+      const guests = [
+        { fullName: 'Ana', documentType: 'PASSPORT' as const, documentNumber: '123', isPrimary: true },
+        { fullName: 'Bea', documentType: 'PASSPORT' as const, documentNumber: '456', isPrimary: false },
+      ];
+      await expect(
+        service.updateDetails('booking-1', 'user-1', { guests, experienceIds: ['exp-1'] }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(bookingsRepository.lockExperiencesForUpdate).toHaveBeenCalledWith(expect.anything(), ['exp-1']);
+      expect(bookingsRepository.replaceGuestsAndExperiences).not.toHaveBeenCalled();
+    });
+
+    it('excludes this same booking from the reserved sum (PUT replaces its own prior selection)', async () => {
+      const { service, bookingsRepository } = buildService();
+      bookingsRepository.lockBookingForUpdate.mockResolvedValue(HELD_BOOKING);
+      bookingsRepository.findCabinWithCategory.mockResolvedValue(CABIN_WITH_CATEGORY);
+      bookingsRepository.findExperiencesByIds.mockResolvedValue([
+        { id: 'exp-1', price: new Prisma.Decimal(150), isIncluded: false },
+      ]);
+      bookingsRepository.lockExperiencesForUpdate.mockResolvedValue([{ id: 'exp-1', capacity: 2 }]);
+      bookingsRepository.sumActiveExperiencePartySize.mockResolvedValue(new Map([['exp-1', 0]]));
+      bookingsRepository.findCruiseCabinPricing.mockResolvedValue(PRICING);
+      bookingsRepository.replaceGuestsAndExperiences.mockResolvedValue({ id: 'booking-1' });
+
+      const guests = [{ fullName: 'Ana', documentType: 'PASSPORT' as const, documentNumber: '123', isPrimary: true }];
+      await service.updateDetails('booking-1', 'user-1', { guests, experienceIds: ['exp-1'] });
+
+      expect(bookingsRepository.sumActiveExperiencePartySize).toHaveBeenCalledWith(
+        expect.anything(),
+        ['exp-1'],
+        'booking-1',
+      );
+      expect(bookingsRepository.replaceGuestsAndExperiences).toHaveBeenCalled();
     });
 
     it('rejects when a requested experience does not belong to this cruise', async () => {

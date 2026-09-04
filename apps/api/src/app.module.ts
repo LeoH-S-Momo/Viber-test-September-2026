@@ -18,6 +18,7 @@ import { OrganizersModule } from './modules/organizers/organizers.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
 import { BookingsModule } from './modules/bookings/bookings.module';
 import { TicketsModule } from './modules/tickets/tickets.module';
+import { ActivitiesModule } from './modules/activities/activities.module';
 import { AdminModule } from './modules/admin/admin.module';
 
 @Module({
@@ -57,6 +58,7 @@ import { AdminModule } from './modules/admin/admin.module';
     OrganizersModule,
     BookingsModule,
     TicketsModule,
+    ActivitiesModule,
     AdminModule,
   ],
   providers: [
