@@ -16,7 +16,7 @@ function redirectPathFor(roles: Array<{ key: string }>): string {
     return '/organizador/check-in';
   }
   if (roles.some((r) => r.key === 'PLATFORM_ADMIN')) {
-    return '/admin';
+    return '/admin/usuarios';
   }
   return '/ingressos';
 }

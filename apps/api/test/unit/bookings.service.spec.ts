@@ -63,6 +63,7 @@ function buildService() {
   const ticketsService = { cancelTicketsForBooking: jest.fn() };
   const holdExpirationQueue = { add: jest.fn(), remove: jest.fn() };
   const ticketIssuanceQueue = { add: jest.fn(), remove: jest.fn() };
+  const auditLog = { record: jest.fn() };
 
   const service = new BookingsService(
     prisma as never,
@@ -72,6 +73,7 @@ function buildService() {
     ticketsService as never,
     holdExpirationQueue as never,
     ticketIssuanceQueue as never,
+    auditLog as never,
   );
 
   return {
@@ -84,6 +86,7 @@ function buildService() {
     ticketsService,
     holdExpirationQueue,
     ticketIssuanceQueue,
+    auditLog,
   };
 }
 

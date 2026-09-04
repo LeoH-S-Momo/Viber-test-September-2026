@@ -1,5 +1,6 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import type { CreateRestaurantInput, UpdateRestaurantInput } from '@seapass/contracts';
+import { AuditLogService } from '../../../audit/audit-log.service';
 import { RestaurantsRepository } from '../persistence/restaurants.repository';
 import { DecksService } from './decks.service';
 import { ShipsService } from './ships.service';
@@ -10,6 +11,7 @@ export class RestaurantsService {
     private readonly restaurantsRepository: RestaurantsRepository,
     private readonly shipsService: ShipsService,
     private readonly decksService: DecksService,
+    private readonly auditLog: AuditLogService,
   ) {}
 
   findByShip(shipId: string) {
@@ -36,16 +38,32 @@ export class RestaurantsService {
     }
   }
 
-  async create(organizerId: string, shipId: string, input: CreateRestaurantInput) {
+  async create(organizerId: string, shipId: string, input: CreateRestaurantInput, actorUserId?: string) {
     await this.shipsService.findOwnedByOrganizerOrThrow(organizerId, shipId);
     await this.assertDeckBelongsToShip(shipId, input.deckId);
-    return this.restaurantsRepository.create(shipId, input);
+    const restaurant = await this.restaurantsRepository.create(shipId, input);
+    await this.auditLog.record({
+      actorUserId: actorUserId ?? null,
+      action: 'restaurant.created',
+      entityType: 'Restaurant',
+      entityId: restaurant.id,
+      metadata: { name: restaurant.name, shipId },
+    });
+    return restaurant;
   }
 
-  async update(organizerId: string, id: string, input: UpdateRestaurantInput) {
+  async update(organizerId: string, id: string, input: UpdateRestaurantInput, actorUserId?: string) {
     const restaurant = await this.findById(id);
     await this.shipsService.findOwnedByOrganizerOrThrow(organizerId, restaurant.shipId);
     await this.assertDeckBelongsToShip(restaurant.shipId, input.deckId);
-    return this.restaurantsRepository.update(id, input);
+    const updated = await this.restaurantsRepository.update(id, input);
+    await this.auditLog.record({
+      actorUserId: actorUserId ?? null,
+      action: 'restaurant.updated',
+      entityType: 'Restaurant',
+      entityId: id,
+      metadata: input,
+    });
+    return updated;
   }
 }

@@ -384,21 +384,27 @@ async function seedVenuesArtistsRestaurants(shipId: string, decks: Record<number
 
   const mareAlta = await prisma.artist.upsert({
     where: { id: 'seed-artist-mare-alta' },
-    update: {},
+    update: {
+      name: 'Maré Alta Heavy Metal Cover Band',
+      bio: 'Cover dedicada aos maiores hinos do heavy metal mundial, de Black Sabbath a Iron Maiden.',
+    },
     create: {
       id: 'seed-artist-mare-alta',
-      name: 'Banda Maré Alta',
-      bio: 'Cover de clássicos do rock nacional e internacional.',
+      name: 'Maré Alta Heavy Metal Cover Band',
+      bio: 'Cover dedicada aos maiores hinos do heavy metal mundial, de Black Sabbath a Iron Maiden.',
     },
   });
 
   const trioBossaRock = await prisma.artist.upsert({
     where: { id: 'seed-artist-trio-bossa-rock' },
-    update: {},
+    update: {
+      name: 'Trio Acústico Unplugged Metal',
+      bio: 'Versões acústicas (unplugged) de clássicos do heavy metal, num formato intimista.',
+    },
     create: {
       id: 'seed-artist-trio-bossa-rock',
-      name: 'Trio Acústico Bossa Rock',
-      bio: 'Releituras acústicas de rock em versão bossa nova.',
+      name: 'Trio Acústico Unplugged Metal',
+      bio: 'Versões acústicas (unplugged) de clássicos do heavy metal, num formato intimista.',
     },
   });
 
@@ -465,7 +471,24 @@ async function seedVenuesArtistsRestaurants(shipId: string, decks: Record<number
   return { teatro, lounge, deckStage, piscina, barMare, mareAlta, trioBossaRock };
 }
 
-async function seedCruise(
+const HEAVY_METAL_DESCRIPTION = [
+  'O Heavy Metal do Leo Sensations é um cruzeiro temático dedicado aos fãs de heavy metal e suas vertentes.',
+  'A experiência combina a atmosfera de um grande navio com shows, música pesada e momentos de diversão em alto-mar.',
+  'Durante a viagem, os passageiros podem vivenciar uma programação especial voltada à cultura do metal.',
+  'O cruzeiro proporciona uma oportunidade única de reunir fãs, artistas e amantes do gênero em um mesmo ambiente.',
+  'Além dos eventos musicais, a viagem oferece toda a estrutura e as atrações de um cruzeiro tradicional.',
+  'É uma experiência criada para quem deseja celebrar o heavy metal, fazer novas amizades e viver dias inesquecíveis no mar.',
+].join('\n');
+
+/**
+ * Cruzeiro principal de demonstração — o único com itinerário/eventos/experiências
+ * completos e dados de reserva/hold/cabine (ver seedCabinAvailabilityDemoData).
+ * `where` casa pelo slug ANTIGO de propósito: garante que rodar o seed de novo
+ * num banco que já tinha "Rock in Sea — Clássicos do Rock" RENOMEIA a linha
+ * existente (preservando reservas/tickets já criados) em vez de criar uma
+ * segunda linha duplicada com o slug novo.
+ */
+async function seedHeavyMetalCruise(
   organizerId: string,
   shipId: string,
   ports: Awaited<ReturnType<typeof seedPorts>>,
@@ -477,16 +500,19 @@ async function seedCruise(
 
   const cruise = await prisma.cruise.upsert({
     where: { slug: 'rock-in-sea-classicos-do-rock' },
-    update: {},
+    update: {
+      title: 'Heavy Metal do Leo Sensations',
+      slug: 'heavy-metal-do-leo-sensations',
+      theme: 'Heavy Metal',
+      description: HEAVY_METAL_DESCRIPTION,
+    },
     create: {
       organizerId,
       shipId,
-      title: 'Rock in Sea — Clássicos do Rock',
-      slug: 'rock-in-sea-classicos-do-rock',
-      theme: 'Rock',
-      description:
-        'Cinco dias navegando pelo litoral com shows tributo aos maiores clássicos do rock, ' +
-        'workshops de instrumentos e festas temáticas a bordo.',
+      title: 'Heavy Metal do Leo Sensations',
+      slug: 'heavy-metal-do-leo-sensations',
+      theme: 'Heavy Metal',
+      description: HEAVY_METAL_DESCRIPTION,
       status: 'PUBLISHED',
       embarkationDate,
       disembarkationDate,
@@ -559,6 +585,9 @@ async function seedCruise(
 
   const events = [
     {
+      // Mantido do seed original ("Maré Alta" e o nome da banda, ver
+      // seedVenuesArtistsRestaurants — funciona pra qualquer genero, sem
+      // precisar de matchTitle).
       title: 'Show de Abertura — Maré Alta',
       category: 'SHOW' as const,
       venueId: venues.teatro.id,
@@ -568,7 +597,8 @@ async function seedCruise(
       isIncluded: true,
     },
     {
-      title: 'Roda de Violão Acústica',
+      title: 'Oficina de Riffs — Guitar Clinic Metal',
+      matchTitle: 'Roda de Violão Acústica',
       category: 'WORKSHOP' as const,
       venueId: venues.lounge.id,
       artistId: null,
@@ -577,7 +607,8 @@ async function seedCruise(
       isIncluded: true,
     },
     {
-      title: 'Festa Deck sob as Estrelas',
+      title: 'Mosh Pit sob as Estrelas',
+      matchTitle: 'Festa Deck sob as Estrelas',
       category: 'PARTY' as const,
       venueId: venues.deckStage.id,
       artistId: null,
@@ -586,7 +617,8 @@ async function seedCruise(
       isIncluded: true,
     },
     {
-      title: 'Show Acústico — Bossa Rock',
+      title: 'Unplugged Metal Night',
+      matchTitle: 'Show Acústico — Bossa Rock',
       category: 'SHOW' as const,
       venueId: venues.lounge.id,
       artistId: venues.trioBossaRock.id,
@@ -598,27 +630,30 @@ async function seedCruise(
 
   for (const event of events) {
     const endAt = new Date(event.start.getTime() + event.durationMin * 60_000);
+    // Casa pelo titulo ANTIGO (`matchTitle`) quando informado, pra renomear a
+    // linha ja existente em vez de criar uma duplicata — mesmo principio do
+    // upsert do cruzeiro acima.
     const existing = await prisma.event.findFirst({
-      where: { cruiseId: cruise.id, title: event.title },
+      where: { cruiseId: cruise.id, title: event.matchTitle ?? event.title },
       select: { id: true },
     });
 
-    if (existing) {
-      continue;
-    }
+    const data = {
+      cruiseId: cruise.id,
+      venueId: event.venueId,
+      artistId: event.artistId,
+      title: event.title,
+      category: event.category,
+      startAt: event.start,
+      endAt,
+      isIncluded: event.isIncluded,
+    };
 
-    await prisma.event.create({
-      data: {
-        cruiseId: cruise.id,
-        venueId: event.venueId,
-        artistId: event.artistId,
-        title: event.title,
-        category: event.category,
-        startAt: event.start,
-        endAt,
-        isIncluded: event.isIncluded,
-      },
-    });
+    if (existing) {
+      await prisma.event.update({ where: { id: existing.id }, data });
+    } else {
+      await prisma.event.create({ data });
+    }
   }
 
   const experiences = [
@@ -629,8 +664,9 @@ async function seedCruise(
       isIncluded: false,
     },
     {
-      title: 'Aula de Percussão',
-      description: 'Oficina de percussão com a equipe musical do navio.',
+      title: 'Aula de Bateria Extrema',
+      matchTitle: 'Aula de Percussão',
+      description: 'Oficina de bateria com a equipe musical do navio, focada em groove pesado e blast beats.',
       price: null,
       isIncluded: true,
     },
@@ -644,26 +680,197 @@ async function seedCruise(
 
   for (const experience of experiences) {
     const existing = await prisma.experience.findFirst({
-      where: { cruiseId: cruise.id, title: experience.title },
+      where: { cruiseId: cruise.id, title: experience.matchTitle ?? experience.title },
       select: { id: true },
     });
 
-    if (existing) {
-      continue;
-    }
+    const data = {
+      cruiseId: cruise.id,
+      title: experience.title,
+      description: experience.description,
+      price: experience.price ?? undefined,
+      isIncluded: experience.isIncluded,
+    };
 
-    await prisma.experience.create({
-      data: {
-        cruiseId: cruise.id,
-        title: experience.title,
-        description: experience.description,
-        price: experience.price ?? undefined,
-        isIncluded: experience.isIncluded,
-      },
-    });
+    if (existing) {
+      await prisma.experience.update({ where: { id: existing.id }, data });
+    } else {
+      await prisma.experience.create({ data });
+    }
   }
 
   return cruise;
+}
+
+/**
+ * Cinco cruzeiros adicionais, só pra povoar o catálogo com temas variados
+ * (pedido explícito do usuário) — mais simples que o de heavy metal acima:
+ * mesmo navio/organizador, itinerário padrão de 5 dias (embarque em Santos,
+ * Ilha Grande, Búzios, dia de mar, desembarque em Santos) e preço por
+ * categoria de cabine, sem eventos/experiências/reservas de demonstração
+ * próprios (essas ficam concentradas no cruzeiro principal).
+ */
+async function seedAdditionalCruises(
+  organizerId: string,
+  shipId: string,
+  ports: Awaited<ReturnType<typeof seedPorts>>,
+  categories: Record<string, string>,
+) {
+  const cruisesData = [
+    {
+      slug: 'marcello-nicolielo-so-as-melhores',
+      title: 'Marcello Nicolielo apresenta: Só as melhores',
+      theme: 'Pop/Rock — Grandes Sucessos',
+      embarkationDate: new Date('2026-12-05T16:00:00Z'),
+      disembarkationDate: new Date('2026-12-10T09:00:00Z'),
+      pricing: { interna: 2100, externa: 2700, varanda: 3400, suite: 4900 },
+      description: [
+        'O cruzeiro Marcello Nicolielo apresenta: Só as melhores reúne os maiores sucessos que marcaram gerações em uma seleção cuidadosamente escolhida por Marcello Nicolielo, um dos nomes mais respeitados na curadoria de grandes hits.',
+        'A bordo, os passageiros vivem uma verdadeira viagem no tempo, com sets que passeiam entre pop, rock e MPB, sempre entoando as canções que todo mundo canta junto.',
+        'A proposta é simples: nada de meio-termo, só as melhores músicas, tocadas para uma plateia que já sabe cada letra de cor.',
+        'Entre um sucesso e outro, o navio se transforma em uma grande festa coletiva, com a pista de dança lotada do início ao fim da viagem.',
+        'Além da trilha sonora inesquecível, a experiência conta com toda a estrutura de um cruzeiro tradicional, unindo boa música, boa companhia e o mar como cenário.',
+        'É o cruzeiro certo para quem quer cantar alto, dançar sem parar e reviver, em alto-mar, as músicas que fizeram história.',
+      ].join('\n'),
+    },
+    {
+      slug: 'paulo-sudre-e-os-mutantes-agitam-o-salao',
+      title: 'Paulo Sudré e os Mutantes agitam o salão',
+      theme: 'Tropicália e Baile Retrô',
+      embarkationDate: new Date('2027-01-15T16:00:00Z'),
+      disembarkationDate: new Date('2027-01-20T09:00:00Z'),
+      pricing: { interna: 1900, externa: 2500, varanda: 3200, suite: 4600 },
+      description: [
+        'O cruzeiro Paulo Sudré e os Mutantes agitam o salão celebra a energia contagiante da música que faz qualquer salão vibrar, unindo tropicália, psicodelia e ritmos dançantes em um só palco.',
+        'Com Paulo Sudré e os Mutantes à frente da programação, os passageiros embarcam em noites de baile animado, onde ninguém fica parado e a pista nunca esfria.',
+        'A viagem resgata o espírito dos grandes bailes, com arranjos coloridos, muita percussão e aquele clima descontraído de festa boa.',
+        'Mais do que um show, é um convite para dançar coladinho, rir à toa e viver a bordo a mesma alegria de uma festa de salão inesquecível.',
+        'Como em todo cruzeiro SeaPass, a experiência musical vem acompanhada da estrutura completa de uma viagem marítima, com conforto e boas atrações em cada deck.',
+        'Ideal para quem busca diversão, dança e uma trilha sonora animada para agitar cada noite no mar.',
+      ].join('\n'),
+    },
+    {
+      slug: 'pagodao-com-thacio-moraes',
+      title: 'Pagodão com Thácio Moraes',
+      theme: 'Pagode',
+      embarkationDate: new Date('2027-02-10T16:00:00Z'),
+      disembarkationDate: new Date('2027-02-15T09:00:00Z'),
+      pricing: { interna: 1800, externa: 2300, varanda: 3000, suite: 4400 },
+      description: [
+        'O cruzeiro Pagodão com Thácio Moraes é feito para quem não abre mão de um bom samba de raiz e de um pagode animado, do início ao fim da viagem.',
+        'Com Thácio Moraes comandando o repertório, os passageiros embarcam em rodas de samba, muito pandeiro e aquele clima de resenha entre amigos que só o pagode proporciona.',
+        'A programação musical passa por clássicos do gênero e sucessos atuais, sempre com espaço para o improviso e para o público cantar junto.',
+        'Entre uma roda e outra, o navio ganha ares de quintal de fim de semana, com boa comida, boa bebida e samba tocando o dia inteiro.',
+        'A experiência une o melhor do pagode à estrutura completa de um cruzeiro tradicional, com toda a comodidade de viajar pelo mar.',
+        'Uma viagem pensada para quem quer sambar, brindar e curtir dias de muita música e descontração em alto-mar.',
+      ].join('\n'),
+    },
+    {
+      slug: 'claude-beats-24h-non-stop-techno',
+      title: 'Claude beats (24h non-stop Techno)',
+      theme: 'Techno',
+      embarkationDate: new Date('2027-03-20T16:00:00Z'),
+      disembarkationDate: new Date('2027-03-25T09:00:00Z'),
+      pricing: { interna: 2400, externa: 3000, varanda: 3900, suite: 5600 },
+      description: [
+        'O cruzeiro Claude beats (24h non-stop Techno) é dedicado a quem vive a batida eletrônica e não quer que a festa pare nunca — literalmente.',
+        'Durante toda a viagem, o navio se transforma em uma pista contínua, com sets non-stop de techno tocando 24 horas por dia, sem intervalos e sem pausas.',
+        'A proposta é imersiva: DJs se revezam no palco para manter a energia sempre no máximo, criando uma experiência hipnótica que une música eletrônica e o balanço do mar.',
+        'Seja de manhã, à tarde ou de madrugada, sempre há um beat pulsando em algum canto do navio, para quem quer dançar a qualquer hora do dia.',
+        'Além da maratona eletrônica, os passageiros também aproveitam toda a estrutura e o conforto de um cruzeiro tradicional entre um set e outro.',
+        'Uma experiência para os verdadeiros apaixonados por música eletrônica, prontos para vivenciar uma jornada sonora ininterrupta em alto-mar.',
+      ].join('\n'),
+    },
+    {
+      slug: 'the-amazing-gemini-and-the-copilots',
+      title: 'The Amazing Gemini and the Copilots',
+      theme: 'Glam Rock / Space Pop',
+      embarkationDate: new Date('2027-04-18T16:00:00Z'),
+      disembarkationDate: new Date('2027-04-23T09:00:00Z'),
+      pricing: { interna: 2300, externa: 2900, varanda: 3700, suite: 5400 },
+      description: [
+        'O cruzeiro The Amazing Gemini and the Copilots é uma viagem musical de estética futurista, inspirada nos grandes espetáculos de glam rock e space pop dos anos 70.',
+        'A bordo, a banda The Amazing Gemini and the Copilots comanda um show cheio de figurinos extravagantes, luzes coloridas e refrões grudentos que convidam todo mundo a cantar junto.',
+        'A proposta é criar uma experiência lúdica e cheia de personalidade, onde cada apresentação parece vinda de um universo paralelo, brilhante e cheio de purpurina.',
+        'Entre um hit e outro, o navio se transforma em um verdadeiro palco intergaláctico, com direito a fantasias, coreografias e muita interação com o público.',
+        'Como em qualquer cruzeiro temático, a viagem também oferece toda a estrutura tradicional de bordo, unindo espetáculo musical e conforto em alto-mar.',
+        'Perfeito para quem gosta de se divertir, se fantasiar um pouco e viver uma experiência musical extravagante e inesquecível.',
+      ].join('\n'),
+    },
+  ];
+
+  const cruises = [];
+  for (const data of cruisesData) {
+    const cruise = await prisma.cruise.upsert({
+      where: { slug: data.slug },
+      update: {
+        title: data.title,
+        theme: data.theme,
+        description: data.description,
+      },
+      create: {
+        organizerId,
+        shipId,
+        title: data.title,
+        slug: data.slug,
+        theme: data.theme,
+        description: data.description,
+        status: 'PUBLISHED',
+        embarkationDate: data.embarkationDate,
+        disembarkationDate: data.disembarkationDate,
+        embarkationPortId: ports.santos.id,
+        disembarkationPortId: ports.santos.id,
+      },
+    });
+
+    const itineraryDays: Array<{
+      dayNumber: number;
+      portId: string | null;
+      isEmbarkation?: boolean;
+      isDisembarkation?: boolean;
+    }> = [
+      { dayNumber: 1, portId: ports.santos.id, isEmbarkation: true },
+      { dayNumber: 2, portId: ports.ilhaGrande.id },
+      { dayNumber: 3, portId: ports.buzios.id },
+      { dayNumber: 4, portId: null },
+      { dayNumber: 5, portId: ports.santos.id, isDisembarkation: true },
+    ];
+
+    for (const day of itineraryDays) {
+      await prisma.itineraryStop.upsert({
+        where: { cruiseId_dayNumber: { cruiseId: cruise.id, dayNumber: day.dayNumber } },
+        update: {},
+        create: {
+          cruiseId: cruise.id,
+          portId: day.portId,
+          dayNumber: day.dayNumber,
+          isEmbarkation: day.isEmbarkation ?? false,
+          isDisembarkation: day.isDisembarkation ?? false,
+        },
+      });
+    }
+
+    for (const [slug, price] of Object.entries(data.pricing)) {
+      const cabinCategoryId = categories[slug];
+      if (!cabinCategoryId) {
+        throw new Error(`Categoria de cabine "${slug}" nao foi criada antes do pricing.`);
+      }
+      await prisma.cruiseCabinPricing.upsert({
+        where: { cruiseId_cabinCategoryId: { cruiseId: cruise.id, cabinCategoryId } },
+        update: { price },
+        create: {
+          cruiseId: cruise.id,
+          cabinCategoryId,
+          price,
+          cancellationPolicy: 'Cancelamento gratuito até 15 dias antes do embarque.',
+        },
+      });
+    }
+
+    cruises.push(cruise);
+  }
+
+  return cruises;
 }
 
 function requireValue<T>(value: T | undefined, label: string): T {
@@ -843,8 +1050,9 @@ async function main(): Promise<void> {
   const { ship, decks } = await seedShip(rockInSea.id);
   const categories = await seedCabinCategoriesAndCabins(ship.id, decks);
   const venues = await seedVenuesArtistsRestaurants(ship.id, decks);
-  const cruise = await seedCruise(rockInSea.id, ship.id, ports, categories, venues);
+  const cruise = await seedHeavyMetalCruise(rockInSea.id, ship.id, ports, categories, venues);
   await seedCabinAvailabilityDemoData(cruise.id, decks, categories, users);
+  const additionalCruises = await seedAdditionalCruises(rockInSea.id, ship.id, ports, categories);
 
   console.log('Seed concluído com sucesso.');
   console.log('');
@@ -855,7 +1063,11 @@ async function main(): Promise<void> {
   console.log(`  - Passageiro:            ${users.passenger1.email}`);
   console.log(`  - Passageiro:            ${users.passenger2.email}`);
   console.log('');
-  console.log(`Cruzeiro de demonstração: "${cruise.title}" (slug: ${cruise.slug})`);
+  console.log('Cruzeiros de demonstração:');
+  console.log(`  - "${cruise.title}" (slug: ${cruise.slug})`);
+  for (const c of additionalCruises) {
+    console.log(`  - "${c.title}" (slug: ${c.slug})`);
+  }
 }
 
 main()

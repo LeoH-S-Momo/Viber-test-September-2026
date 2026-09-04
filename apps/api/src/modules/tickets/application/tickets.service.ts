@@ -1,6 +1,7 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import * as QRCode from 'qrcode';
 import { Prisma, TicketStatus, type BookingStatus } from '@prisma/client';
+import { AuditLogService } from '../../../audit/audit-log.service';
 import { PrismaService } from '../../../database/prisma/prisma.service';
 import { CheckInPolicy, type CheckInCandidate, type CheckInOutcome } from '../domain/check-in.policy';
 import { generateSecureTicketCode } from '../domain/secure-code';
@@ -29,6 +30,7 @@ export class TicketsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly ticketsRepository: TicketsRepository,
+    private readonly auditLog: AuditLogService,
   ) {}
 
   /**
@@ -92,7 +94,7 @@ export class TicketsService {
     code: string,
     location?: string,
   ): Promise<CheckInTicketView> {
-    return this.prisma.$transaction(async (tx) => {
+    const view = await this.prisma.$transaction(async (tx) => {
       const locked = await this.ticketsRepository.lockByCodeForUpdate(tx, code);
       if (!locked) {
         throw new NotFoundException('Ticket nao encontrado.');
@@ -110,6 +112,16 @@ export class TicketsService {
       const updated = await this.ticketsRepository.findByIdForCheckIn(tx, ticket.id);
       return this.toCheckInView(updated!);
     });
+
+    await this.auditLog.record({
+      actorUserId: staffUserId,
+      action: 'ticket.checked_in',
+      entityType: 'Ticket',
+      entityId: view.ticketId,
+      metadata: { code: view.code, cruiseSlug: view.cruiseSlug, location: location ?? null },
+    });
+
+    return view;
   }
 
   /**

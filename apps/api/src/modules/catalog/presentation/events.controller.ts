@@ -42,7 +42,7 @@ export class EventsController {
     @Body(new ZodValidationPipe(CreateEventSchema)) body: CreateEventInput,
   ) {
     const organizerId = requireOrganizerId(user, RoleKey.ORGANIZER_ADMIN);
-    return this.eventsService.create(organizerId, body);
+    return this.eventsService.create(organizerId, body, user.sub);
   }
 
   @ApiBearerAuth()
@@ -54,6 +54,6 @@ export class EventsController {
     @Body(new ZodValidationPipe(UpdateEventSchema)) body: UpdateEventInput,
   ) {
     const organizerId = requireOrganizerId(user, RoleKey.ORGANIZER_ADMIN);
-    return this.eventsService.update(organizerId, id, body);
+    return this.eventsService.update(organizerId, id, body, user.sub);
   }
 }

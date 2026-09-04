@@ -1,10 +1,14 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import type { CreateShipInput, UpdateShipInput } from '@seapass/contracts';
+import { AuditLogService } from '../../../audit/audit-log.service';
 import { ShipsRepository } from '../persistence/ships.repository';
 
 @Injectable()
 export class ShipsService {
-  constructor(private readonly shipsRepository: ShipsRepository) {}
+  constructor(
+    private readonly shipsRepository: ShipsRepository,
+    private readonly auditLog: AuditLogService,
+  ) {}
 
   findMany(organizerId?: string) {
     return this.shipsRepository.findMany(organizerId);
@@ -27,12 +31,22 @@ export class ShipsService {
     return ship;
   }
 
-  create(organizerId: string, input: CreateShipInput) {
-    return this.shipsRepository.create(organizerId, input);
+  async create(organizerId: string, input: CreateShipInput, actorUserId?: string) {
+    const ship = await this.shipsRepository.create(organizerId, input);
+    await this.auditLog.record({
+      actorUserId: actorUserId ?? null,
+      action: 'ship.created',
+      entityType: 'Ship',
+      entityId: ship.id,
+      metadata: { name: ship.name, organizerId },
+    });
+    return ship;
   }
 
-  async update(organizerId: string, id: string, input: UpdateShipInput) {
+  async update(organizerId: string, id: string, input: UpdateShipInput, actorUserId?: string) {
     await this.findOwnedByOrganizerOrThrow(organizerId, id);
-    return this.shipsRepository.update(id, input);
+    const ship = await this.shipsRepository.update(id, input);
+    await this.auditLog.record({ actorUserId: actorUserId ?? null, action: 'ship.updated', entityType: 'Ship', entityId: id, metadata: input });
+    return ship;
   }
 }

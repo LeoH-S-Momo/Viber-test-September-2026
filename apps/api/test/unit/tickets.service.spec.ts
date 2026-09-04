@@ -53,9 +53,10 @@ function buildService() {
   };
   const tx = {};
   const prisma = { $transaction: jest.fn((callback: (tx: unknown) => unknown) => callback(tx)) };
+  const auditLog = { record: jest.fn() };
 
-  const service = new TicketsService(prisma as never, ticketsRepository as never);
-  return { service, ticketsRepository, prisma, tx };
+  const service = new TicketsService(prisma as never, ticketsRepository as never, auditLog as never);
+  return { service, ticketsRepository, prisma, tx, auditLog };
 }
 
 describe('TicketsService', () => {

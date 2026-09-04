@@ -7,6 +7,7 @@ import type {
   UpdateCruiseInput,
 } from '@seapass/contracts';
 import { generateUniqueSlug } from '../../../common/utils/slug';
+import { AuditLogService } from '../../../audit/audit-log.service';
 import { CabinAvailabilityPolicy } from '../domain/cabin-availability.policy';
 import { CruiseStatusPolicy } from '../domain/cruise-status.policy';
 import { toPageResult } from '../domain/pagination';
@@ -24,6 +25,7 @@ export class CruisesService {
     private readonly cabinsRepository: CabinsRepository,
     private readonly shipsService: ShipsService,
     private readonly cabinCategoriesService: CabinCategoriesService,
+    private readonly auditLog: AuditLogService,
   ) {}
 
   /** Catalogo publico — nunca mostra nada alem de cruzeiros PUBLISHED, independente do que o cliente pedir. */
@@ -66,22 +68,38 @@ export class CruisesService {
     return this.cruisesRepository.findByIdWithDetail(id);
   }
 
-  async create(organizerId: string, input: CreateCruiseInput) {
+  async create(organizerId: string, input: CreateCruiseInput, actorUserId?: string) {
     await this.shipsService.findOwnedByOrganizerOrThrow(organizerId, input.shipId);
 
     const slug = await generateUniqueSlug(input.title, (candidate) =>
       this.cruisesRepository.existsBySlug(candidate),
     );
 
-    return this.cruisesRepository.create(organizerId, slug, input);
+    const cruise = await this.cruisesRepository.create(organizerId, slug, input);
+    await this.auditLog.record({
+      actorUserId: actorUserId ?? null,
+      action: 'cruise.created',
+      entityType: 'Cruise',
+      entityId: cruise.id,
+      metadata: { title: cruise.title, organizerId },
+    });
+    return cruise;
   }
 
-  async update(organizerId: string, id: string, input: UpdateCruiseInput) {
+  async update(organizerId: string, id: string, input: UpdateCruiseInput, actorUserId?: string) {
     await this.findByIdForOrganizer(organizerId, id);
-    return this.cruisesRepository.update(id, input);
+    const cruise = await this.cruisesRepository.update(id, input);
+    await this.auditLog.record({
+      actorUserId: actorUserId ?? null,
+      action: 'cruise.updated',
+      entityType: 'Cruise',
+      entityId: id,
+      metadata: input,
+    });
+    return cruise;
   }
 
-  async publish(organizerId: string, id: string) {
+  async publish(organizerId: string, id: string, actorUserId?: string) {
     const cruise = await this.findByIdForOrganizer(organizerId, id);
 
     const readiness = await this.cruisesRepository.findPublishReadiness(id);
@@ -94,13 +112,17 @@ export class CruisesService {
       hasPricing: readiness._count.cabinPricings > 0,
     });
 
-    return this.cruisesRepository.updateStatus(id, CruiseStatus.PUBLISHED);
+    const updated = await this.cruisesRepository.updateStatus(id, CruiseStatus.PUBLISHED);
+    await this.auditLog.record({ actorUserId: actorUserId ?? null, action: 'cruise.published', entityType: 'Cruise', entityId: id });
+    return updated;
   }
 
-  async unpublish(organizerId: string, id: string) {
+  async unpublish(organizerId: string, id: string, actorUserId?: string) {
     const cruise = await this.findByIdForOrganizer(organizerId, id);
     CruiseStatusPolicy.assertCanUnpublish(cruise.status);
-    return this.cruisesRepository.updateStatus(id, CruiseStatus.DRAFT);
+    const updated = await this.cruisesRepository.updateStatus(id, CruiseStatus.DRAFT);
+    await this.auditLog.record({ actorUserId: actorUserId ?? null, action: 'cruise.unpublished', entityType: 'Cruise', entityId: id });
+    return updated;
   }
 
   /**

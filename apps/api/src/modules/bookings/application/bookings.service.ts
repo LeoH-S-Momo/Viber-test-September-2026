@@ -5,6 +5,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { BookingStatus, CabinStatus, CruiseStatus, PaymentMethod, PaymentStatus, Prisma } from '@prisma/client';
 import type { Queue } from 'bullmq';
 import { CabinAvailabilityPolicy, type CabinAvailability } from '../../catalog/domain/cabin-availability.policy';
+import { AuditLogService } from '../../../audit/audit-log.service';
 import { PrismaService } from '../../../database/prisma/prisma.service';
 import { CABIN_HOLD_EXPIRATION_JOB, CABIN_HOLD_EXPIRATION_QUEUE } from '../../../jobs/cabin-hold-queue';
 import { TICKET_ISSUANCE_JOB, TICKET_ISSUANCE_QUEUE } from '../../../jobs/ticket-issuance-queue';
@@ -57,6 +58,7 @@ export class BookingsService {
     private readonly ticketsService: TicketsService,
     @InjectQueue(CABIN_HOLD_EXPIRATION_QUEUE) private readonly holdExpirationQueue: Queue,
     @InjectQueue(TICKET_ISSUANCE_QUEUE) private readonly ticketIssuanceQueue: Queue,
+    private readonly auditLog: AuditLogService,
   ) {}
 
   private get holdMinutes(): number {
@@ -453,6 +455,14 @@ export class BookingsService {
       // no check-in mesmo com a reserva cancelada. No-op (0 linhas) se nunca chegou a CONFIRMED.
       await this.ticketsService.cancelTicketsForBooking(tx, bookingId);
       return cancelled;
+    });
+
+    await this.auditLog.record({
+      actorUserId: userId,
+      action: 'booking.cancelled',
+      entityType: 'Booking',
+      entityId: booking.id,
+      metadata: { reason: reason?.trim() || 'Cancelada pelo usuario.' },
     });
 
     await this.cancelScheduledExpiration(booking.id);

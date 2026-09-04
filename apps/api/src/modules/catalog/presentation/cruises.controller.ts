@@ -57,7 +57,7 @@ export class CruisesController {
     @Body(new ZodValidationPipe(CreateCruiseSchema)) body: CreateCruiseInput,
   ) {
     const organizerId = requireOrganizerId(user, RoleKey.ORGANIZER_ADMIN);
-    return this.cruisesService.create(organizerId, body);
+    return this.cruisesService.create(organizerId, body, user.sub);
   }
 
   @ApiBearerAuth()
@@ -69,7 +69,7 @@ export class CruisesController {
     @Body(new ZodValidationPipe(UpdateCruiseSchema)) body: UpdateCruiseInput,
   ) {
     const organizerId = requireOrganizerId(user, RoleKey.ORGANIZER_ADMIN);
-    return this.cruisesService.update(organizerId, id, body);
+    return this.cruisesService.update(organizerId, id, body, user.sub);
   }
 
   @ApiBearerAuth()
@@ -90,7 +90,7 @@ export class CruisesController {
   @HttpCode(HttpStatus.OK)
   publish(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     const organizerId = requireOrganizerId(user, RoleKey.ORGANIZER_ADMIN);
-    return this.cruisesService.publish(organizerId, id);
+    return this.cruisesService.publish(organizerId, id, user.sub);
   }
 
   @ApiBearerAuth()
@@ -99,6 +99,6 @@ export class CruisesController {
   @HttpCode(HttpStatus.OK)
   unpublish(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     const organizerId = requireOrganizerId(user, RoleKey.ORGANIZER_ADMIN);
-    return this.cruisesService.unpublish(organizerId, id);
+    return this.cruisesService.unpublish(organizerId, id, user.sub);
   }
 }

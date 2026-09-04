@@ -34,7 +34,7 @@ export class ExperiencesController {
     @Body(new ZodValidationPipe(CreateExperienceSchema)) body: CreateExperienceInput,
   ) {
     const organizerId = requireOrganizerId(user, RoleKey.ORGANIZER_ADMIN);
-    return this.experiencesService.create(organizerId, body);
+    return this.experiencesService.create(organizerId, body, user.sub);
   }
 
   @ApiBearerAuth()
@@ -46,6 +46,6 @@ export class ExperiencesController {
     @Body(new ZodValidationPipe(UpdateExperienceSchema)) body: UpdateExperienceInput,
   ) {
     const organizerId = requireOrganizerId(user, RoleKey.ORGANIZER_ADMIN);
-    return this.experiencesService.update(organizerId, id, body);
+    return this.experiencesService.update(organizerId, id, body, user.sub);
   }
 }

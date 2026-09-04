@@ -948,4 +948,116 @@ de `logout()`) simplesmente não funcionava, e o que confirmou visualmente que a
 coerente em todas as áreas do site (pública, passageiro, organizador) antes de considerar o pedido
 atendido.
 
+## 2026-09-04 — Painel administrativo global (PLATFORM_ADMIN)
+
+**O quê:** implementado o painel administrativo global pedido explicitamente pelo usuário — acesso
+restrito a `PLATFORM_ADMIN`, 13 módulos (usuários, organizadores, cruzeiros, navios, cabines,
+reservas, pagamentos, eventos, restaurantes, experiências, cupons, tickets, check-ins), cada um com
+listagem, busca, filtros, paginação, detalhes e ações administrativas, mais uma área de auditoria.
+
+**Backend:**
+- 5 controllers/services novos em `apps/api/src/modules/admin/` (`AdminUsersService`,
+  `AdminCatalogService`, `AdminSalesService`, `AdminCouponsService`, e o `AdminService` original
+  estendido com organizadores paginados/filtrados) — todos leem `PrismaService` direto, não os
+  services do catálogo do organizador (que carregam checagem de posse irrelevante pra um admin
+  global). Contratos Zod novos em `packages/contracts/src/admin/admin.schema.ts`.
+- Retrofit de auditoria em toda a aplicação, não só nas rotas novas: `CruisesService`,
+  `ShipsService`, `EventsService`, `RestaurantsService`, `ExperiencesService` (criação/alteração/
+  publicação), `BookingsService.cancelBooking` (cancelamento) e `TicketsService.confirmCheckIn`
+  (alteração de status) agora chamam `AuditLogService.record(...)` depois de cada mutação, via um
+  parâmetro `actorUserId?` opcional (deliberadamente opcional — evita reescrever toda suíte de
+  testes unitários que já instanciava esses services sem esse argumento).
+- `Coupon` ganhou seu primeiro CRUD HTTP (só existia usado internamente no checkout até agora).
+- Cancelamento administrativo de reserva reaproveita `TicketsService.cancelTicketsForBooking` — o
+  mesmo método que o cancelamento do próprio passageiro já usa, garantindo que tickets emitidos são
+  invalidados também quando é um admin que cancela.
+- Bug real encontrado escrevendo os testes de integração: `AdminCouponsQuerySchema.isActive` usava
+  `z.coerce.boolean()`, que trata `"false"` como `true` (qualquer string não-vazia é truthy em JS)
+  — o filtro de cupons inativos estava silenciosamente quebrado. Corrigido com um enum explícito.
+- `test/integration/admin.e2e-spec.ts` (novo, 16 casos): RBAC nas 15 famílias de rota, os 13
+  módulos fim-a-fim, o cancelamento em cascata do ticket, e a auditoria (actor/ação/entidade/
+  timestamp corretos) inclusive dos filtros e paginação de `GET /admin/audit-logs`. Suíte de
+  integração completa (131 testes) e unitária (248 testes) verde, typecheck e lint limpos.
+
+**Frontend:** painel completo em `apps/web/src/app/(admin)/admin/` (14 páginas — 13 módulos +
+auditoria), com sidebar própria e `RequireRole` no layout (não por página, já que as 14 exigem o
+mesmo papel). Dois hooks novos (`useAdminList`, `useAdminDetail`) carregam o padrão repetido de
+filtro+paginação e de "modal de detalhes por id" nas 13 páginas, evitando reimplementar o mesmo
+`useState`/`useEffect` catorze vezes. `Modal` (novo componente compartilhado), `AdminPagination` e
+`AdminActionButton` (confirma via `window.confirm`/`window.prompt`, chama a API, recarrega a lista)
+completam as peças reaproveitadas pelos 13+1 módulos. Cupons é o único módulo com formulário de
+criação/edição completo (os outros 12 são leitura + uma ação de status). `auth-nav.tsx` e
+`login/page.tsx` ganharam o branch de `PLATFORM_ADMIN` (link "Painel Admin" no header,
+redirecionamento pós-login pra `/admin/usuarios`). `authFetchJson`/`qs` foram promovidos de dentro
+de `organizers.service.ts` para `lib/api-client.ts`, compartilhados agora pelos dois services.
+Build de produção (`next build`) gera as 14 rotas sem erro; typecheck e lint limpos.
+
+Racional completo (arquitetura Prisma-direto, técnica do parâmetro opcional, o bug do
+`z.coerce.boolean()`, as escolhas do frontend) em
+[ADR-0018](architecture/decisions/0018-admin-panel.md).
+
+**Por quê:** pedido explícito do usuário, incluindo o requisito específico de que a auditoria
+armazene informação suficiente para responder quem fez, o que fez, quando fez e qual recurso foi
+afetado — daí o retrofit cobrir a aplicação inteira (não só as 13 rotas novas do painel), já que
+"registre operações sensíveis como criação, alteração, exclusão, publicação, cancelamento,
+alteração de status" descreve ações que já existiam em outros módulos antes desta tarefa.
+
+## 2026-09-04 — Catálogo de demonstração com 6 cruzeiros temáticos
+
+**O quê:** o seed (`apps/api/src/database/prisma/seed.ts`) criava só um cruzeiro de demonstração
+("Rock in Sea — Clássicos do Rock"). A pedido do usuário, virou seis, cada um com um tema e nome
+específicos, e uma descrição de 5-6 frases coerente com o tema (mesmo estilo/tamanho do exemplo que
+o usuário deu para o cruzeiro de heavy metal):
+
+- **Heavy Metal do Leo Sensations** (Heavy Metal) — o cruzeiro original renomeado no lugar (mesmo
+  `id`, preservando reservas/tickets de demonstração já existentes); os 4 eventos e a experiência de
+  percussão também foram renomeados para caber no tema (ex.: "Roda de Violão Acústica" →
+  "Oficina de Riffs — Guitar Clinic Metal"; "Show Acústico — Bossa Rock" → "Unplugged Metal Night"),
+  e as duas bandas fictícias (`seedVenuesArtistsRestaurants`) ganharam bio de cover de heavy metal.
+  Descrição usada é o texto exato fornecido pelo usuário.
+- **Marcello Nicolielo apresenta: Só as melhores** (Pop/Rock — Grandes Sucessos)
+- **Paulo Sudré e os Mutantes agitam o salão** (Tropicália e Baile Retrô)
+- **Pagodão com Thácio Moraes** (Pagode)
+- **Claude beats (24h non-stop Techno)** (Techno)
+- **The Amazing Gemini and the Copilots** (Glam Rock / Space Pop)
+
+Os 5 novos cruzeiros reaproveitam o mesmo navio/organizador (Rock in Sea, MS Harmonia das Ondas) e o
+itinerário padrão de 5 dias (Santos → Ilha Grande → Búzios → dia de mar → Santos), cada um com datas
+de embarque escalonadas entre nov/2026 e abr/2027 e preço por categoria de cabine próprio — sem
+réplica dos eventos/experiências/reservas de demonstração, que continuam concentrados só no cruzeiro
+principal (heavy metal).
+
+**Detalhe técnico:** o `cruise.upsert` (e o rename dos 4 eventos/1 experience do cruzeiro principal)
+casa o `where` pelo *slug/título antigo* e escreve o novo no `update` — renomeia a linha já existente
+em bancos que já tinham rodado o seed antes, em vez de criar uma segunda linha duplicada com o slug
+novo. Confirmado rodando `pnpm db:seed` duas vezes seguidas e checando via `GET /cruises` que só
+existe uma linha por cruzeiro (nenhum "Rock in Sea — Clássicos do Rock" órfão).
+
+**Por quê:** pedido explícito do usuário — trocar os nomes dos cruzeiros mockados por nomes
+específicos (a maioria referências pessoais/em tom de brincadeira) e dar a cada um uma descrição
+coerente com seu tema, seguindo o padrão de texto do exemplo de heavy metal fornecido.
+
+## 2026-09-04 — Limpeza dos cruzeiros de teste no banco de dev
+
+**O quê:** o banco de dev tinha 96 cruzeiros: os 7 reais (os 6 renomeados no item acima + "Cruzeiro
+Costa Dourada (Editado)") e 89 sobras de rodadas de `pnpm test:integration` — cada suíte de e2e cria
+seus próprios navio/organizador/cruzeiro com um sufixo `<label>-<timestamp>-<hash>` (helper `unique()`
+usado em `rbac.e2e-spec.ts`, `catalog.e2e-spec.ts`, etc.) contra esta mesma base, sem limpar depois.
+A pedido do usuário, removidos via script pontual (não versionado, rodado direto contra o banco):
+todo cruzeiro cujo título contém uma sequência de 6+ dígitos (o timestamp) foi deletado — as 89 sobras
+batem 100% nesse padrão, os 7 reais não têm dígito nenhum no título.
+
+Cada cruzeiro deletado teve suas reservas apagadas primeiro (`Booking.cruise` é `onDelete: Restrict`
+no schema — apagar o cruzeiro direto teria falhado com FK violation enquanto houvesse reserva presa
+a ele); o cascade do Prisma cuidou do resto (hóspedes, tickets, check-ins, pagamentos, itinerário,
+preço por cabine, eventos, experiências). 374 reservas removidas em cascata junto dos 89 cruzeiros.
+Catálogo público (`GET /cruises`) confirmado com só os 7 restantes depois da limpeza.
+
+**Por quê:** pedido explícito do usuário — o catálogo estava poluído com dezenas de cruzeiros de
+teste ("Navio de Teste", títulos cheios de número) atrapalhando a visualização dos cruzeiros
+temáticos de verdade. Nota: "Cruzeiro Costa Dourada (Editado)" foi mantido por não bater em nenhum
+dos dois critérios pedidos (nem "Navio de teste", nem título com número), embora pareça ser sobra de
+teste também (organizador "Organizer portalcheck1788520121639") — vale confirmar com o usuário se
+deve sair numa próxima limpeza.
+
 <!-- Novas entradas são adicionadas ao final, em ordem cronológica, cada uma com data, "O quê" e "Por quê". -->

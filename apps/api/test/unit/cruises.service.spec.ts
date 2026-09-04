@@ -18,6 +18,7 @@ function buildService() {
   const cabinsRepository = { findActiveBookingsForCruise: jest.fn() };
   const shipsService = { findOwnedByOrganizerOrThrow: jest.fn() };
   const cabinCategoriesService = { findById: jest.fn() };
+  const auditLog = { record: jest.fn() };
 
   const service = new CruisesService(
     cruisesRepository as never,
@@ -25,9 +26,10 @@ function buildService() {
     cabinsRepository as never,
     shipsService as never,
     cabinCategoriesService as never,
+    auditLog as never,
   );
 
-  return { service, cruisesRepository, decksRepository, cabinsRepository, shipsService, cabinCategoriesService };
+  return { service, cruisesRepository, decksRepository, cabinsRepository, shipsService, cabinCategoriesService, auditLog };
 }
 
 describe('CruisesService', () => {

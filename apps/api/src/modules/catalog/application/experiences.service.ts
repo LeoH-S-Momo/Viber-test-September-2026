@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import type { CreateExperienceInput, UpdateExperienceInput } from '@seapass/contracts';
+import { AuditLogService } from '../../../audit/audit-log.service';
 import { ExperiencesRepository } from '../persistence/experiences.repository';
 import { CruisesService } from './cruises.service';
 
@@ -8,6 +9,7 @@ export class ExperiencesService {
   constructor(
     private readonly experiencesRepository: ExperiencesRepository,
     private readonly cruisesService: CruisesService,
+    private readonly auditLog: AuditLogService,
   ) {}
 
   findByCruise(cruiseId: string) {
@@ -29,14 +31,30 @@ export class ExperiencesService {
     return experience;
   }
 
-  async create(organizerId: string, input: CreateExperienceInput) {
+  async create(organizerId: string, input: CreateExperienceInput, actorUserId?: string) {
     await this.cruisesService.findByIdForOrganizer(organizerId, input.cruiseId);
-    return this.experiencesRepository.create(input);
+    const experience = await this.experiencesRepository.create(input);
+    await this.auditLog.record({
+      actorUserId: actorUserId ?? null,
+      action: 'experience.created',
+      entityType: 'Experience',
+      entityId: experience.id,
+      metadata: { title: experience.title, cruiseId: input.cruiseId },
+    });
+    return experience;
   }
 
-  async update(organizerId: string, id: string, input: UpdateExperienceInput) {
+  async update(organizerId: string, id: string, input: UpdateExperienceInput, actorUserId?: string) {
     const experience = await this.findById(id);
     await this.cruisesService.findByIdForOrganizer(organizerId, experience.cruise.id);
-    return this.experiencesRepository.update(id, input);
+    const updated = await this.experiencesRepository.update(id, input);
+    await this.auditLog.record({
+      actorUserId: actorUserId ?? null,
+      action: 'experience.updated',
+      entityType: 'Experience',
+      entityId: id,
+      metadata: input,
+    });
+    return updated;
   }
 }

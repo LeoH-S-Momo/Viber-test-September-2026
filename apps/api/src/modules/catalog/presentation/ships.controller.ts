@@ -40,7 +40,7 @@ export class ShipsController {
     @Body(new ZodValidationPipe(CreateShipSchema)) body: CreateShipInput,
   ) {
     const organizerId = requireOrganizerId(user, RoleKey.ORGANIZER_ADMIN);
-    return this.shipsService.create(organizerId, body);
+    return this.shipsService.create(organizerId, body, user.sub);
   }
 
   @ApiBearerAuth()
@@ -52,6 +52,6 @@ export class ShipsController {
     @Body(new ZodValidationPipe(UpdateShipSchema)) body: UpdateShipInput,
   ) {
     const organizerId = requireOrganizerId(user, RoleKey.ORGANIZER_ADMIN);
-    return this.shipsService.update(organizerId, id, body);
+    return this.shipsService.update(organizerId, id, body, user.sub);
   }
 }

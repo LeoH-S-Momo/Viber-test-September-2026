@@ -10,7 +10,7 @@ import type {
   UpdateRestaurantInput,
   UpdateShipInput,
 } from '@seapass/contracts';
-import { getApiBaseUrl, safeFetchJson, type ServiceResult } from '@/lib/api-client';
+import { authFetchJson, getApiBaseUrl, qs, safeFetchJson, type ServiceResult } from '@/lib/api-client';
 import type { CruiseDetail, CruiseSummary, PaginatedResult, Port } from '@/types/cruise';
 import type {
   OrganizerBooking,
@@ -22,43 +22,6 @@ import type {
   OrganizerShip,
   PageResult,
 } from '@/types/organizer';
-
-/** Fetch autenticado — usado so por client components (o token so existe em memoria, ver AuthProvider). */
-async function authFetchJson<T>(path: string, accessToken: string, init: RequestInit = {}): Promise<ServiceResult<T>> {
-  try {
-    const response = await fetch(`${getApiBaseUrl()}${path}`, {
-      ...init,
-      headers: {
-        ...(init.body ? { 'Content-Type': 'application/json' } : {}),
-        Authorization: `Bearer ${accessToken}`,
-        ...init.headers,
-      },
-    });
-    if (!response.ok) {
-      const body = await response.json().catch(() => null);
-      return { ok: false, message: body?.message ?? `A API respondeu com status ${response.status}.`, status: response.status };
-    }
-    if (response.status === 204) {
-      return { ok: true, data: undefined as T };
-    }
-    const data = (await response.json()) as T;
-    return { ok: true, data };
-  } catch (error) {
-    return {
-      ok: false,
-      message: error instanceof Error ? `Nao foi possivel conectar a API: ${error.message}` : 'Nao foi possivel conectar a API.',
-    };
-  }
-}
-
-function qs(params: object): string {
-  const search = new URLSearchParams();
-  for (const [key, value] of Object.entries(params) as Array<[string, string | undefined]>) {
-    if (value) search.set(key, value);
-  }
-  const s = search.toString();
-  return s ? `?${s}` : '';
-}
 
 export interface DashboardFilter {
   cruiseId?: string;

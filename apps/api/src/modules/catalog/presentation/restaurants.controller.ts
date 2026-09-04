@@ -35,7 +35,7 @@ export class RestaurantsController {
     @Body(new ZodValidationPipe(CreateRestaurantSchema)) body: CreateRestaurantInput,
   ) {
     const organizerId = requireOrganizerId(user, RoleKey.ORGANIZER_ADMIN);
-    return this.restaurantsService.create(organizerId, shipId, body);
+    return this.restaurantsService.create(organizerId, shipId, body, user.sub);
   }
 
   @ApiBearerAuth()
@@ -47,6 +47,6 @@ export class RestaurantsController {
     @Body(new ZodValidationPipe(UpdateRestaurantSchema)) body: UpdateRestaurantInput,
   ) {
     const organizerId = requireOrganizerId(user, RoleKey.ORGANIZER_ADMIN);
-    return this.restaurantsService.update(organizerId, id, body);
+    return this.restaurantsService.update(organizerId, id, body, user.sub);
   }
 }
