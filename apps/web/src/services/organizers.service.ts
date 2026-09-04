@@ -51,9 +51,9 @@ async function authFetchJson<T>(path: string, accessToken: string, init: Request
   }
 }
 
-function qs(params: Record<string, string | undefined>): string {
+function qs(params: object): string {
   const search = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
+  for (const [key, value] of Object.entries(params) as Array<[string, string | undefined]>) {
     if (value) search.set(key, value);
   }
   const s = search.toString();
@@ -119,6 +119,12 @@ export function getPorts(): Promise<ServiceResult<Port[] | PaginatedResult<Port>
 
 export function getShipVenues(shipId: string): Promise<ServiceResult<Array<{ id: string; name: string }>>> {
   return safeFetchJson(`${getApiBaseUrl()}/ships/${shipId}/venues`);
+}
+
+export function getShipCabinCategories(
+  shipId: string,
+): Promise<ServiceResult<Array<{ id: string; name: string; maxOccupancy: number }>>> {
+  return safeFetchJson(`${getApiBaseUrl()}/ships/${shipId}/cabin-categories`);
 }
 
 export function getArtists(): Promise<ServiceResult<Array<{ id: string; name: string }>>> {

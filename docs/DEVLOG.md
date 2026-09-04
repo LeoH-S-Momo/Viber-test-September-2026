@@ -834,4 +834,90 @@ mostrar "horário a confirmar" em vez de preencher um campo) é o que torna essa
 a disciplina desta conversa de sempre verificar em navegador de verdade foi o que revelou o caso de
 borda do "Dia -1" antes de qualquer usuário real ver algo pior que isso.
 
+## 2026-09-04 — Portal do organizador: dashboard, catálogo, reservas e isolamento multi-tenant
+
+**O quê:** implementado o painel completo do organizador — Dashboard, Cruzeiros, Navios, Eventos,
+Restaurantes, Experiências, Reservas, Passageiros e Relatórios — com garantia de isolamento
+multi-tenant aplicada no backend e testada explicitamente. Racional completo em
+[ADR-0016](architecture/decisions/0016-organizer-portal.md).
+
+**Isolamento sempre por construção da query, nunca por filtro depois:** toda rota nova filtra por
+`organizerId` diretamente no `where` do Prisma (`cruise: { organizerId }`) — um `cruiseId` de outro
+organizador passado como filtro nunca "vaza" dados, a condição combinada simplesmente não bate com
+nada. `OrganizersService.getDashboard` leva isso ao extremo: a lista de cruzeiros usada em toda
+consulta subsequente vem sempre de `organizerId`, nunca de um id cru da query.
+
+**Dashboard com as dez métricas pedidas:** receita, reservas (total e confirmadas), ocupação geral e
+por categoria de cabine, passageiros, ticket médio, cancelamentos, vendas por período (agrupado por
+dia de `confirmedAt`), eventos e experiências mais procurados (via `groupBy` do Prisma). Filtro por
+cruzeiro e por período (presets de 30/90/365 dias ou tudo).
+
+**Backend novo:** `GET /organizers/me/{ships,events,restaurants,experiences,bookings,passengers,dashboard,cruises/:id}` —
+reutilizando os services do catálogo já existentes (`ShipsService.findMany` já suportava filtro por
+organizador; `EventsService`/`RestaurantsService`/`ExperiencesService` ganharam `findManyForOrganizer`
+novo; reservas/passageiros são inteiramente novos, antes só existiam como `/bookings/me` do próprio
+passageiro).
+
+**Gráficos com a skill de visualização de dados:** `recharts` novo no frontend — um eixo só por
+gráfico, barra empilhada de duas séries com legenda para ocupação (Reservado/Disponível), ranking
+horizontal de série única para eventos/experiências mais procurados. A paleta de marca (`brand-*`,
+um teal desaturado) não passou no piso de croma do validador da skill para uso em gráfico — cores
+específicas de gráfico foram escolhidas em vez disso, mantendo `brand-*`/`accent-*` só na UI (botões,
+badges).
+
+**Formulário real de criar/editar cruzeiro:** o único form explicitamente pedido — navio, título,
+tema, datas, portos, mais um painel de preço por categoria de cabine e publicar/despublicar (sem
+isso o organizador nunca tiraria um cruzeiro novo do rascunho, já que a criação não aceita preço).
+Navios/Eventos/Restaurantes/Experiências também ganharam formulário de criação (não só leitura) —
+necessário para o organizador conseguir popular o catálogo por trás dos cruzeiros.
+
+**Testes de autorização multi-tenant:** `organizer-portal.e2e-spec.ts` (30 testes, novo) — dois
+organizadores completos (A e B), provando que A nunca vê as sete listas "minhas coisas" nem o
+dashboard de B, mesmo passando o `cruiseId` de B como filtro (sempre 404). Também estendeu cobertura
+para rotas de escrita do catálogo que já tinham a checagem de posse no código mas nunca tinham sido
+testadas isoladamente (Decks, CabinCategories, Cabins, Venues). Total API: 30 testes novos de
+integração (85 → 115 no total, 11 suítes — confirmado rodando contra infraestrutura real).
+
+**Infraestrutura local reconstruída do zero (fora do escopo do código, mas registrado por ser
+relevante para próximas sessões nesta máquina):** ao retomar a sessão, Postgres/Redis não estavam
+mais acessíveis (nem Docker, nem WSL, nem instalação nativa encontrada). Resolvido instalando
+PostgreSQL 17 nativo via `winget` (funcionou de primeira) — o instalador MSI do Redis-compatível
+Memurai falhou (`SFXCA: Failed to create temp directory. Error code 5`, `icacls` confirmou que
+`C:\Windows\Temp` está com ACL quebrada nesta máquina, bloqueando qualquer instalador MSI baseado em
+WiX/custom actions), contornado com um build portátil de Redis para Windows (zip, sem instalador,
+`tporadowski/redis` 5.0.14.1) rodando direto via `redis-server.exe`. Criado o usuário/banco
+`seapass` afrouxando `pg_hba.conf` para `trust` temporariamente (autorizado explicitamente pelo
+usuário) e restaurado para `scram-sha-256` logo em seguida, confirmado com uma tentativa de conexão
+sem senha falhando depois da restauração. Com a infra de pé, a suíte de integração completa rodou
+100% (115 testes, 11 suítes — 85 já existentes + 30 novos desta etapa, isolamento multi-tenant
+incluso), com BullMQ avisando (não falhando) sobre a versão antiga do Redis portátil
+(recomendação: 6.2+, esta é 5.0.14.1) — nenhum teste foi afetado por isso.
+
+**Verificação visual real, com dados de verdade:** organizador com navio (10 cabines em 2
+categorias), cruzeiro publicado, evento, restaurante, experiência e 3 passageiros com reservas
+confirmadas, semeados via API. Dashboard mostrando números reais (receita R$ 11.280, 3 reservas,
+30% de ocupação, ticket médio R$ 3.760) com os gráficos renderizando proporcionalmente corretos
+(confirmado inspecionando os `<rect>` do SVG, não só o olho — a diferença de altura entre
+Deluxe 40% e Standard 20% de ocupação bate exatamente com o que a tabela de Relatórios mostra).
+Edição de cruzeiro testada de ponta a ponta: o título mudou no formulário, o `PATCH` foi conferido
+direto no banco (`UPDATE ... SET title = 'Cruzeiro Costa Dourada (Editado)'`), e a mudança apareceu
+tanto na lista de Cruzeiros quanto na coluna "Cruzeiro" da tela de Reservas — a mesma reserva vista
+de dois ângulos diferentes do painel. Todas as 8 páginas restantes (novo cruzeiro, navios, eventos,
+restaurantes, experiências, reservas, passageiros, relatórios) carregaram com o conteúdo esperado,
+sem erro de console além do 401 já conhecido do refresh silencioso antes do login.
+
+**Infra registrada como serviço do Windows, não mais um processo manual:** o Redis portátil (que
+tinha subido como processo solto em background) foi reinstalado como serviço de verdade
+(`redis-server.exe --service-install`, nome do serviço "Redis", início automático) — junto com o
+Postgres (já um serviço desde a instalação via `winget`), ambos agora sobrevivem a um reboot sem
+precisar de nenhuma ação manual numa próxima sessão. Documentado em
+`.claude/skills/seapass-local-infra/SKILL.md` para a próxima sessão nesta máquina não precisar
+redescobrir nada disso (nem reinstalar o Memurai, que continua falhando por causa da ACL quebrada
+em `C:\Windows\Temp`).
+
+**Por quê:** o pedido foi explícito em garantir isolamento de dados no BACKEND (não só no frontend)
+e em criar testes para autorização multi-tenant — a mesma disciplina desta conversa (nunca confiar
+numa leitura solta seguida de filtro, sempre embutir a condição de posse na própria consulta) foi
+reaplicada aqui, agora provada com dois organizadores reais e não só um.
+
 <!-- Novas entradas são adicionadas ao final, em ordem cronológica, cada uma com data, "O quê" e "Por quê". -->

@@ -7,9 +7,12 @@ import { Container } from '@/components/ui/container';
 import { buttonVariants } from '@/components/ui/button-styles';
 import { useAuth } from '@/lib/auth-context';
 
-/** Redireciona pra onde faz sentido pra cada papel — ver ADR-0013. */
+/** Redireciona pra onde faz sentido pra cada papel — ver ADR-0013/0016. */
 function redirectPathFor(roles: Array<{ key: string }>): string {
-  if (roles.some((r) => r.key === 'ORGANIZER_STAFF' || r.key === 'ORGANIZER_ADMIN')) {
+  if (roles.some((r) => r.key === 'ORGANIZER_ADMIN')) {
+    return '/organizador/dashboard';
+  }
+  if (roles.some((r) => r.key === 'ORGANIZER_STAFF')) {
     return '/organizador/check-in';
   }
   if (roles.some((r) => r.key === 'PLATFORM_ADMIN')) {

@@ -302,6 +302,23 @@ inventado. Um destaque de "próximo compromisso" no topo responde de cara a "ond
 agora?". Remover uma atividade reservada é um clique direto na linha da timeline. Racional completo
 em [ADR-0015](docs/architecture/decisions/0015-minha-viagem.md).
 
+## Portal do organizador
+
+Painel completo em `/organizador` (Dashboard, Cruzeiros, Navios, Eventos, Restaurantes,
+Experiências, Reservas, Passageiros, Relatórios), restrito a `ORGANIZER_ADMIN`. Dashboard com
+receita, reservas, ocupação (geral e por categoria de cabine), passageiros, ticket médio,
+cancelamentos, vendas por período e eventos/experiências mais procurados, com gráficos e filtro por
+cruzeiro/período. **Isolamento multi-tenant garantido no backend**: toda consulta filtra por
+`organizerId` na própria query (nunca depois de buscar) — um organizador nunca visualiza ou altera
+dados de outro, provado por 30 testes de integração dedicados. Criação/edição de cruzeiro via
+formulário real (navio, datas, portos, preço por categoria de cabine, publicar/despublicar).
+Racional completo em [ADR-0016](docs/architecture/decisions/0016-organizer-portal.md).
+
+```bash
+curl -s localhost:3333/organizers/me/dashboard -H "Authorization: Bearer $ORG_TOKEN"
+curl -s "localhost:3333/organizers/me/bookings?cruiseId=$CRUISE" -H "Authorization: Bearer $ORG_TOKEN"
+```
+
 ## Status
 
 Fase atual: bootstrap do monorepo, camada de persistência, autenticação/autorização, módulo de
@@ -318,8 +335,9 @@ desconto/taxa), checkout via `PaymentGateway` simulado (aprovação/recusa/timeo
 idempotência testada com corridas reais), ingresso digital com QR Code e check-in do Staff por
 código (uso único garantido sob concorrência real, interface dedicada em `/organizador/check-in`),
 reserva de eventos/restaurantes a bordo com overbooking e conflito de horário impedidos sob
-concorrência real, e a página Minha Viagem (`/reservas`) reunindo tudo numa timeline dia a dia
-construída só com dado real, verificada em navegador de verdade, health check e
-documentação de API no ar. Gateway de pagamento real (Stripe/Mercado Pago de verdade), leitura de
-QR Code por câmera e notificações continuam fora de escopo. Ver `docs/DEVLOG.md` para o histórico e
-`docs/product/BACKLOG.md` para o roadmap priorizado.
+concorrência real, a página Minha Viagem (`/reservas`) reunindo tudo numa timeline dia a dia
+construída só com dado real, e o portal do organizador (`/organizador`) com dashboard, gestão de
+catálogo e isolamento multi-tenant garantido no backend (30 testes dedicados) concluídos — health
+check e documentação de API no ar. Gateway de pagamento real (Stripe/Mercado Pago de verdade),
+leitura de QR Code por câmera e notificações continuam fora de escopo. Ver `docs/DEVLOG.md` para o
+histórico e `docs/product/BACKLOG.md` para o roadmap priorizado.
