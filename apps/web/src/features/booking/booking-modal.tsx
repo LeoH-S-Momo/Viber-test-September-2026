@@ -90,7 +90,13 @@ export function BookingModal({
   }, []);
 
   async function handleClose() {
-    if (step.name === 'guests' && step.booking.status === 'HELD') {
+    // 'guests' OU 'payment' — o booking continua HELD ate o checkout de fato rodar (so vira
+    // PAYMENT_PENDING/CONFIRMED dentro de checkout(), ver bookings.service.ts), entao fechar o
+    // modal na tela de pagamento (o ponto de abandono mais comum: usuario compara formas de
+    // pagamento e desiste) tambem precisa liberar o hold — sem isto a cabine ficava presa ate a
+    // expiracao mesmo sem nenhum HELD chegar perto do checkout (bug encontrado e corrigido na
+    // revisao geral de 2026-09-05).
+    if ((step.name === 'guests' || step.name === 'payment') && step.booking.status === 'HELD') {
       // Best-effort — libera a cabine na hora em vez de deixar o usuario esperar a expiracao do
       // hold pra tentar de novo (ver CABIN_HOLD_MINUTES no backend). Nao bloqueia o fechamento.
       void releaseHold(accessToken, step.booking.id);
@@ -342,9 +348,18 @@ export function BookingModal({
               Pagamento aprovado e reserva confirmada! Seu ingresso digital aparece em <strong>Minha viagem</strong> em
               instantes.
             </p>
-          ) : (
+          ) : paymentMethod === 'BOLETO' ? (
             <p className="text-sm text-slate-600">
               Reserva registrada — pagamento pendente de compensação (boleto). Assim que for aprovado, sua reserva é
+              confirmada automaticamente e você recebe um e-mail.
+            </p>
+          ) : (
+            // PIX/cartao tambem podem cair aqui num timeout do gateway (nao so boleto — ver
+            // BookingsService.checkout) — dizer "aguardando boleto" pra quem nunca escolheu
+            // boleto seria factualmente errado e confuso (bug encontrado e corrigido na revisao
+            // geral de 2026-09-05).
+            <p className="text-sm text-slate-600">
+              Reserva registrada — o pagamento ainda está sendo processado. Assim que for aprovado, sua reserva é
               confirmada automaticamente e você recebe um e-mail.
             </p>
           )}

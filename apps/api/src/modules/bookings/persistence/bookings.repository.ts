@@ -41,6 +41,11 @@ export class BookingsRepository {
     return this.prisma.booking.findMany({
       where: { userId },
       orderBy: { createdAt: 'desc' },
+      // Sem paginacao de verdade (GET /bookings/me devolve um array simples, nao um
+      // PaginatedResult) — um teto generoso evita uma query sem limite (com includes pesados)
+      // pra quem acumular muitas reservas ao longo do tempo, sem quebrar o contrato atual do
+      // endpoint (Minha Viagem so usa a mais recente CONFIRMED, sempre dentro deste teto).
+      take: 50,
       include: {
         cruise: { select: { id: true, title: true, slug: true, embarkationDate: true } },
         cabin: { select: { id: true, code: true, cabinCategory: { select: { name: true, maxOccupancy: true } } } },

@@ -1197,4 +1197,194 @@ repetidas foram limpas do dev DB ao final desta sessão.
 profissional, com instrução direta de corrigir (não só listar) e de fechar com um relatório do que
 foi melhorado.
 
+## 2026-09-05 — Revisão geral noturna: bugs encontrados e corrigidos (sem supervisão)
+
+**O quê:** pedido explícito do usuário pra rodar sem pedir autorização durante a noite, revisar
+o código geral, achar bugs e consertar. Baseline antes de começar: 263 unitários + 138 integração
+(API), 30 unitários (web), `typecheck`/`lint` limpos — tudo já verde. Metodologia: 3 agentes de
+auditoria somente-leitura em paralelo (backend, frontend, contratos/testes/infra), cada achado
+verificado por leitura direta do código antes de corrigir (nenhum "conserto" às cegas).
+
+**Bug no próprio spec de e2e (achado ao rodar a suíte de baseline, três camadas):**
+`booking-flow.spec.ts` tinha três problemas empilhados, cada um mascarando o próximo até ser
+isolado com um script de depuração dedicado (`page.on('response', ...)` + comparação direta com
+`curl` no backend). (1) fixava `count` das cabines "disponíveis" no início do loop e indexava por
+`.nth(i)` — fechar o modal de uma tentativa fracassada dispara `router.refresh()`, que pode
+encolher essa lista, e o teste esperava por um índice que deixou de existir, travando até o
+timeout de 90s; corrigido reconsultando a lista do zero a cada tentativa, marcando rótulos já
+tentados num `Set`. (2) um seletor `[aria-label*="disponível"]` casava por engano com
+"indisponível" (contém "disponível" como substring) — trocado por `$=` (termina com). (3) o mais
+sutil: `router.refresh()` é um refresh CLIENT-SIDE (Router Cache/Data Cache do Next) — chamado
+repetidas vezes em sequência rápida dentro da MESMA instância de página (o padrão "fecha o modal
+e tenta a próxima cabine"), ele não garantia dado fresco a tempo da leitura seguinte: o rótulo de
+uma cabine recém-reservada continuava dizendo "disponível" por mais uma ou duas tentativas,
+fazendo o teste reincidir na mesma cabine já presa (409 legítimo, mas testando a cabine errada) em
+vez de progredir — confirmado comparando `curl` direto no backend (sempre correto) contra o que a
+página realmente renderizava (defasado). Corrigido trocando a estratégia de retry: cada tentativa
+agora faz um `page.goto` novo (reload completo, sempre busca a Server Component do zero) em vez de
+reusar a mesma instância de página entre tentativas.
+
+**Segurança — Crítico: token de recuperação de senha logado em texto puro em produção.**
+`AuthService.forgotPassword` gravava o token cru (a credencial que dá acesso total à troca de
+senha) em todo `POST /auth/forgot-password`, em qualquer ambiente, sem o guard de `NODE_ENV` que
+o controller já tinha pro campo `devToken` da resposta — mesma classe de bug do JWT/cookie em log
+já corrigida numa revisão anterior (ver ADR-0020), só que pra este segredo específico. Corrigido
+com o mesmo guard; teste de regressão adicionado.
+
+**Backend — Alto: cancelar uma reserva nunca cancelava suas reservas de evento/restaurante.**
+`BookingsService.cancelBooking`, `AdminSalesService.cancelBooking` e
+`AdminCatalogService.cancelCruise` cancelavam a `Booking` e seus `Ticket`s mas nunca tocavam
+`EventReservation`/`DiningReservation` — elas ficavam `CONFIRMED` presas pra sempre, continuando
+a contar contra a capacidade do evento/horário mesmo com a viagem cancelada (o espelho invertido
+do cuidado que o código já tem contra overbooking). Corrigido nos 3 pontos, em bulk
+(`updateMany`, não um loop), na mesma transação do cancelamento. Coberto por um novo teste de
+integração de ponta a ponta (reserva + evento + jantar → cancela a reserva → confirma as duas
+capacidades liberadas).
+
+**Contratos — Alto: dois `Update*Schema` perdiam a checagem de ordem de data num PATCH parcial.**
+`UpdateCouponSchema` e `UpdateCruiseSchema` só rejeitavam `validFrom > validUntil` (ou
+`embarkationDate`/`disembarkationDate`) quando os DOIS campos vinham juntos no mesmo PATCH — Zod
+não tem como comparar contra o valor já salvo do campo que faltou no body. Um PATCH parcial
+(`{ validFrom: "2030-01-01" }` num cupom cujo `validUntil` já era antes disso) passava sem erro
+nenhum e tornava o cupom permanentemente irredimível (`CouponPolicy.validate` nunca acha um `now`
+que satisfaça nenhum dos dois lados). Mesma falha, gravidade menor, em cruzeiros. E `Event.startAt`/
+`endAt` nunca era validado em lugar nenhum, nem no create. Corrigido: `CreateEventSchema` e
+`UpdateEventSchema` ganharam o mesmo `.refine()` que `CreateCruiseSchema` já tinha;
+`AdminCouponsService.update`, `CruisesService.update` e `EventsService.update` ganharam um
+backstop que revalida o par MERGED (input ou valor existente) antes de escrever — a única forma
+de fechar o buraco do PATCH parcial, já que o Zod sozinho não alcança o banco. Testes de
+regressão novos para os 3.
+
+**Frontend — Alto: renovação de sessão concorrente podia derrubar uma sessão legítima.** O
+intervalo de 10min e o listener de `visibilitychange` (ambos em `auth-context.tsx`) podiam
+disparar `POST /auth/refresh` quase juntos com o MESMO cookie. O backend rotaciona o refresh
+token a cada uso e trata um token já revogado como possível roubo, revogando TODOS os tokens do
+usuário (`TokensService.rotateRefreshToken`) — duas chamadas concorrentes da mesma sessão
+legítima acionavam exatamente essa defesa contra si mesmas, deslogando o usuário no meio do uso.
+Corrigido com um guard de "renovação em voo": a segunda chamada reusa a `Promise` da primeira em
+vez de disparar uma segunda request.
+
+**Frontend — Alto: fechar o modal de reserva na tela de pagamento não liberava a cabine.** O hold
+só era liberado se `step.name === 'guests'` — mas a reserva continua `HELD` até o checkout rodar
+de fato (só vira `PAYMENT_PENDING`/`CONFIRMED` dentro de `checkout()`), então abandonar na tela de
+pagamento (o ponto de desistência mais comum: comparar formas de pagamento e sair) deixava a
+cabine presa até a expiração do hold, contrariando o próprio comentário do código. Corrigido:
+guard ampliado pra `'guests' || 'payment'`.
+
+**Frontend — Médio/Baixo, também corrigidos:** mapa do navio mostrava disponibilidade
+CONGELADA no momento do clique (o painel de detalhe guardava o objeto cheio, não um id — depois
+de reservar uma cabine e o `router.refresh()` trazer dado novo, o painel continuava mostrando a
+cabine recém-reservada como disponível); mensagem de sucesso do pagamento dizia "(boleto)" pra
+QUALQUER `PAYMENT_PENDING`, mesmo PIX/cartão que deram timeout no gateway; cancelar uma reserva de
+evento/restaurante que falhasse (ex.: fora do prazo) não mostrava erro nenhum, só revertia o
+spinner silenciosamente; `useAdminDetail` não tinha a mesma proteção contra resposta fora de
+ordem que `useAdminList` já tinha.
+
+**Testado:** suíte completa depois de todas as correções — 274 unitários + 141 integração (API,
++11/+3 dos novos testes de regressão), 30 unitários (web), `typecheck`/`lint` limpos nos dois
+apps, suíte E2E completa (Playwright) incluindo `booking-flow.spec.ts` de ponta a ponta num
+browser real (2 casos, ambos verdes de forma consistente depois do fix descrito acima). Reservas
+HELD/PAYMENT_PENDING abandonadas por execuções repetidas de teste foram limpas do dev DB
+compartilhado várias vezes ao longo da sessão (mesma característica do ambiente já registrada na
+entrada de hardening anterior). No meio da depuração do bug do `router.refresh()`, os dev servers
+de `api` e `web` (rodando continuamente há muitas horas, sob carga pesada desta própria sessão)
+foram reiniciados como parte da investigação — descartado como causa raiz depois (o problema era
+mesmo o refresh client-side), mas mantido como uma reinicialização limpa saudável de qualquer
+forma.
+
+**Por quê:** pedido explícito do usuário — revisão geral autônoma, sem pedir permissão, achando e
+corrigindo bugs de verdade (não apenas listando), com o projeto rodando sem supervisão durante a
+noite.
+
+## 2026-09-05 — Auditoria final de Staff Engineer + documentação profissional
+
+**O quê:** pedido explícito do usuário — revisão final do projeto "como se fosse avaliado por uma
+equipe profissional", com instrução de corrigir (não só listar), sem inventar complexidade nova.
+Metodologia: 3 agentes de auditoria em paralelo (backend, frontend, DevOps/testes/docs), cada um
+instruído a NÃO repetir achados já corrigidos nas duas rodadas de hardening anteriores (ver
+ADR-0020 e as duas entradas de DEVLOG de 2026-09-04/05) — o foco desta vez era arquitetura,
+organização de módulos, duplicação, nomes inconsistentes, abstrações desnecessárias e código morto.
+
+**Segurança/autorização — corrigido:** dois módulos (`ActivitiesService.assertShipOwnedByOrganizer`,
+`TicketsService.assertBelongsToOrganizer`) lançavam 403 (`ForbiddenException`) para um recurso de
+outro organizador, contrariando a regra já documentada em ADR-0005 (404, nunca 403 — não confirmar
+existência a quem não é dono). Corrigido nos dois; `lookupForCheckIn` (consulta, não mutação) foi
+além — em vez de lançar qualquer exceção, agora trata um ticket de outro organizador exatamente
+como um código inexistente (`outcome: INVALID`), consistente com o próprio comentário da função
+("nunca lança 404 aqui — é uma consulta"), que a implementação anterior contradizia.
+
+**Banco de dados — corrigido:** `BookingExperience` só tinha `@@unique([bookingId, experienceId])`
+— `experienceId` não é a coluna líder desse índice composto, então
+`sumActiveExperiencePartySize(Plain)` (hot path de toda leitura de disponibilidade de adicional)
+fazia sequential scan. Adicionado `@@index([experienceId])`, mesmo padrão que
+`EventReservation`/`DiningReservation` já tinham. Migration `20260905030000_booking_experience_index`.
+
+**Código morto — removido:** 4 diretórios de módulo vazios (`itineraries/`, `cabins/`, `ships/`,
+`restaurants/`, só `.gitkeep`) — sobra do scaffolding inicial, superados pela consolidação em
+`catalog/`. Duas funções de serviço no frontend (`getEventAvailability`/`getDiningAvailability`)
+exportadas mas nunca chamadas em lugar nenhum. Infraestrutura MinIO/S3-compatible inteira (serviço
+no Docker Compose dev e em CI, variáveis `STORAGE_*`/`MINIO_*`) e as variáveis `SENTRY_DSN`/
+`OTEL_EXPORTER_OTLP_ENDPOINT` — nenhuma tinha um único consumidor real no código (zero uploads de
+arquivo implementados, zero integração de Sentry/OTEL), provisionadas desde o início do projeto e
+nunca usadas. Documentado honestamente em "Limitações conhecidas" (README) em vez de manter
+configuração morta implicando uma funcionalidade que não existe.
+
+**Duplicação de código — corrigido no frontend:** `tickets.service.ts` e `activities.service.ts`
+ainda tinham cada um sua própria cópia privada de `authFetchJson`, idêntica à versão compartilhada
+em `api-client.ts` — a consolidação do hardening anterior não tinha alcançado esses dois arquivos.
+`cruises.service.ts` reimplementava `qs()` (já existente em `api-client.ts`). `PageResult` em
+`types/organizer.ts` era um alias puro de `PaginatedResult` sem nenhuma diferença de comportamento
+— removido, usa `PaginatedResult` direto (como `admin.service.ts` já fazia).
+
+**Duplicação de código — corrigido no backend:** dois controllers admin (`admin-catalog`,
+`admin-sales`) definiam o mesmo schema Zod inline (`{ reason: z.string().max(300).optional() }`)
+em vez de importar de `@seapass/contracts` — único lugar do codebase onde isso acontecia. Movido
+para `AdminCancelReasonSchema` compartilhado.
+
+**Documentação desatualizada — corrigida:** `apps/api/src/modules/README.md` descrevia módulos
+"planejados" que nunca existiram como módulos próprios (`cruises`, `events`, `restaurants` — na
+verdade consolidados em `catalog/`) e uma convenção de teste colocalizado que o projeto nunca
+seguiu (testes vivem centralizados em `apps/api/test/`). `apps/web/src/hooks/README.md` e
+`stores/README.md` descreviam Zustand/TanStack Query — nenhum dos dois é dependência do projeto.
+`components/README.md` mandava `PascalCase.tsx` quando todo arquivo real é `kebab-case.tsx`
+(exportando um componente `PascalCase` — a convenção real, só nunca documentada certo).
+`features/README.md` tinha um exemplo de pastas parcialmente fictício e nenhuma exceção
+documentada para `cabin-booking-flow.tsx` importar `ShipMap` de outra feature (uma ponte
+deliberada, não uma violação da regra). Todos corrigidos para refletir o código real.
+
+**DevOps — corrigido:** `infra/docker/{api,web}.Dockerfile` não tinham `HEALTHCHECK` (usando
+`node -e` contra um módulo `http`, não `curl`/`wget` — nenhum dos dois é garantido em
+`node:alpine`). CI: o job `docker-build` só rodava em push pra `main` (uma imagem quebrada só
+seria descoberta depois de já ter mergeado) — agora roda em toda PR, e ganhou um smoke test real
+(sobe o container da API com credenciais falsas, confirma que ele responde HTTP em vez de só
+"buildou"). Teste `health.controller.spec.ts` só verificava que duas funções foram passadas pro
+`HealthCheckService`, nunca que eram as funções certas — agora invoca cada uma e confirma que
+delega pro indicator certo (Postgres/Redis, na ordem certa).
+
+**Considerado e decidido não fazer (documentado, não esquecido):** extrair um componente genérico
+de tabela/modal para as ~14 páginas do painel admin (a duplicação existe, mas cada página difere
+o bastante em colunas/ações que a abstração exigiria bastante indireção — sem um terceiro caso
+idêntico real, não compensa ainda); separar `OrganizersService` (CRUD de tenant) de um
+`OrganizerDashboardService` (analytics) — os dois compartilham `requireOwnedCruise`/
+`dateRangeFilter`, e a mistura de responsabilidades, embora real, ainda não atrapalha o suficiente
+para justificar a divisão. Ambos documentados em "Limitações conhecidas"/"Próximos passos" no
+README, com o raciocínio explícito de por que não agora.
+
+**Documentação final:** README.md reescrito por completo — Visão geral, Problema, Solução,
+Funcionalidades, Arquitetura, Stack, Decisões arquiteturais (linkando os 20 ADRs relevantes),
+Modelagem, Fluxo de reserva, Estratégia contra overbooking, Autenticação e autorização, Pagamentos,
+Eventos assíncronos, Testes, Segurança, Observabilidade, como rodar localmente/testes/Swagger,
+Variáveis de ambiente, Usuários de demonstração, Estrutura do projeto, Limitações conhecidas,
+Próximos passos, e uma seção nova "Decisões técnicas que eu explicaria em uma entrevista" (20
+decisões, cada uma com o trade-off real por trás). Corrigida a alegação obsoleta de que
+notificações estavam "fora de escopo" (implementadas há duas revisões, ver ADR-0019) e a falta de
+qualquer menção ao painel admin/hardening no README anterior.
+
+**Testado:** suíte completa depois de todas as correções — 274 unitários + 141 integração (API),
+30 unitários (web), `typecheck`/`lint` limpos nos dois apps.
+
+**Por quê:** pedido explícito do usuário — auditoria final por um "Staff Engineer" antes de
+apresentar o projeto num processo seletivo, com instrução direta de corrigir incrementalmente
+(nunca reescrever o que já funciona) e documentar de forma profissional o resultado.
+
 <!-- Novas entradas são adicionadas ao final, em ordem cronológica, cada uma com data, "O quê" e "Por quê". -->

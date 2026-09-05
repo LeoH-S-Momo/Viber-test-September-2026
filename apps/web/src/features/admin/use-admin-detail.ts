@@ -11,8 +11,17 @@ export function useAdminDetail<T>(fetcher: (accessToken: string, id: string) => 
 
   useEffect(() => {
     if (!accessToken) return;
+    let cancelled = false;
     setDetail('loading');
-    fetcherRef.current(accessToken, id).then((result) => setDetail(result.ok ? result.data : 'error'));
+    // Guarda contra resposta fora de ordem (mesmo padrao de use-admin-list.ts) — sem isto, se
+    // `id` mudasse com o modal ainda montado, uma resposta lenta do `id` antigo podia chegar
+    // DEPOIS da busca do `id` novo e sobrescrever o painel com a entidade errada.
+    fetcherRef.current(accessToken, id).then((result) => {
+      if (!cancelled) setDetail(result.ok ? result.data : 'error');
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [accessToken, id]);
 
   return detail;

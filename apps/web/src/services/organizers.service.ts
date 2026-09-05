@@ -20,7 +20,6 @@ import type {
   OrganizerPassenger,
   OrganizerRestaurant,
   OrganizerShip,
-  PageResult,
 } from '@/types/organizer';
 
 export interface DashboardFilter {
@@ -39,8 +38,8 @@ export interface BookingsFilter {
   page?: string;
 }
 
-export function getBookings(accessToken: string, filter: BookingsFilter): Promise<ServiceResult<PageResult<OrganizerBooking>>> {
-  return authFetchJson<PageResult<OrganizerBooking>>(`/organizers/me/bookings${qs(filter)}`, accessToken);
+export function getBookings(accessToken: string, filter: BookingsFilter): Promise<ServiceResult<PaginatedResult<OrganizerBooking>>> {
+  return authFetchJson<PaginatedResult<OrganizerBooking>>(`/organizers/me/bookings${qs(filter)}`, accessToken);
 }
 
 export interface PassengersFilter {
@@ -52,8 +51,8 @@ export interface PassengersFilter {
 export function getPassengers(
   accessToken: string,
   filter: PassengersFilter,
-): Promise<ServiceResult<PageResult<OrganizerPassenger>>> {
-  return authFetchJson<PageResult<OrganizerPassenger>>(`/organizers/me/passengers${qs(filter)}`, accessToken);
+): Promise<ServiceResult<PaginatedResult<OrganizerPassenger>>> {
+  return authFetchJson<PaginatedResult<OrganizerPassenger>>(`/organizers/me/passengers${qs(filter)}`, accessToken);
 }
 
 export function getMyCruises(accessToken: string, filter: { page?: string } = {}): Promise<ServiceResult<PaginatedResult<CruiseSummary>>> {

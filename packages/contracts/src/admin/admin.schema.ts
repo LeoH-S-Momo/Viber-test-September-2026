@@ -7,6 +7,14 @@ const AdminListBaseSchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });
 
+/**
+ * Corpo de "cancelar X" quando o admin faz (cruzeiro ou reserva) — motivo opcional, so um
+ * `reason`. Antes duplicado inline em admin-catalog.controller.ts e admin-sales.controller.ts
+ * (unico lugar do codebase onde um schema de validacao nao vinha de @seapass/contracts).
+ */
+export const AdminCancelReasonSchema = z.object({ reason: z.string().max(300).optional() });
+export type AdminCancelReasonInput = z.infer<typeof AdminCancelReasonSchema>;
+
 // --- Usuarios ---
 export const UserStatusSchema = z.enum(["ACTIVE", "SUSPENDED", "PENDING_VERIFICATION"]);
 export const AdminUsersQuerySchema = AdminListBaseSchema.extend({

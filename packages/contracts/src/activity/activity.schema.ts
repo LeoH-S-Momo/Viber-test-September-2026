@@ -20,6 +20,17 @@ export const ReserveDiningSchema = z.object({
 });
 export type ReserveDiningInput = z.infer<typeof ReserveDiningSchema>;
 
+/**
+ * GET .../dining-slots/:id/availability?date=... — `z.coerce.date()` rejeita uma string
+ * nao-parseavel com um 400 limpo antes de chegar no service; sem isto, `date` cru vinha da
+ * query string sem validacao nenhuma e um valor invalido virava uma Data invalida que so
+ * quebrava mais tarde, dentro da query ao Prisma, como um 500 generico.
+ */
+export const DiningAvailabilityQuerySchema = z.object({
+  date: z.coerce.date(),
+});
+export type DiningAvailabilityQuery = z.infer<typeof DiningAvailabilityQuerySchema>;
+
 export const CreateDiningSlotSchema = z.object({
   label: z.string().min(2).max(80),
   startTime: z.coerce.date(),

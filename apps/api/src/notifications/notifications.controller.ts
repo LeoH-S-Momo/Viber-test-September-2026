@@ -16,8 +16,12 @@ type NotificationsQuery = z.infer<typeof NotificationsQuerySchema>;
 /**
  * "Log de notificacoes" do proprio usuario — ver ADR-0019. So leitura (nunca
  * ha um endpoint de escrita: notificacoes so nascem de eventos de dominio,
- * ver NotificationsDomainEventsListener), qualquer papel autenticado pode
- * ver as suas (sem @Roles — mesmo espirito de `GET /tickets/me`).
+ * ver NotificationsDomainEventsListener). Deliberadamente sem @Roles —
+ * `Notification` e um recurso generico por usuario, nao especifico de um
+ * papel (ao contrario de `GET /tickets/me`, que E restrito a PASSENGER):
+ * hoje todo tipo de notificacao emitido e voltado ao passageiro dono da
+ * reserva, mas a rota nao PRECISA excluir outros papeis pra estar correta —
+ * so devolveria uma lista vazia pra quem nunca recebeu nenhuma.
  */
 @ApiTags('notifications')
 @ApiBearerAuth()

@@ -26,4 +26,9 @@ COPY --from=build --chown=node:node /app/apps/api/src/database/prisma ./prisma
 # na imagem base node:alpine (uid 1000), nao precisa ser criado.
 USER node
 EXPOSE 3333
+# `node -e` em vez de curl/wget — alpine nao garante nenhum dos dois, mas node esta
+# garantidamente presente (e a propria imagem). Bate no health check real da API (Postgres +
+# Redis), nao so "o processo esta de pe".
+HEALTHCHECK --interval=10s --timeout=5s --start-period=10s --retries=5 \
+  CMD node -e "require('http').get('http://localhost:3333/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
 CMD ["node", "dist/main.js"]

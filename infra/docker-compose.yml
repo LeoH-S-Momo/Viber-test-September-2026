@@ -1,6 +1,7 @@
 # Ambiente de desenvolvimento local do SeaPass.
-# Sobe apenas a infraestrutura (banco, cache, storage); api e web rodam via `pnpm dev` (turbo)
-# fora de container para manter hot-reload rápido. Uso: `docker compose -f infra/docker-compose.yml up -d`
+# Sobe apenas a infraestrutura (banco, cache, SMTP de teste); api e web rodam via `pnpm dev`
+# (turbo) fora de container para manter hot-reload rápido. Uso:
+# `docker compose -f infra/docker-compose.yml up -d`
 #
 # Variaveis lidas do arquivo `.env` na raiz do monorepo (ver `.env.example`).
 
@@ -34,19 +35,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
-
-  minio:
-    image: minio/minio:latest
-    restart: unless-stopped
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-    ports:
-      - "${MINIO_PORT}:9000"
-      - "${MINIO_CONSOLE_PORT}:9001"
-    volumes:
-      - ../.data/minio:/data
 
   # SMTP de mentira para inspecionar as notificacoes por e-mail em dev (ver
   # docs/architecture/decisions/0019-events-and-notifications.md) — sem persistencia (a caixa de

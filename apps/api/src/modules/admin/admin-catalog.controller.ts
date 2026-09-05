@@ -3,26 +3,25 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { RoleKey } from '@prisma/client';
 import {
   AdminCabinsQuerySchema,
+  AdminCancelReasonSchema,
   AdminCruisesQuerySchema,
   AdminEventsQuerySchema,
   AdminExperiencesQuerySchema,
   AdminRestaurantsQuerySchema,
   AdminShipsQuerySchema,
   type AdminCabinsQuery,
+  type AdminCancelReasonInput,
   type AdminCruisesQuery,
   type AdminEventsQuery,
   type AdminExperiencesQuery,
   type AdminRestaurantsQuery,
   type AdminShipsQuery,
 } from '@seapass/contracts';
-import { z } from 'zod';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import type { AuthenticatedUser } from '../auth/types/jwt-payload';
 import { AdminCatalogService } from './admin-catalog.service';
-
-const CancelCruiseBodySchema = z.object({ reason: z.string().max(300).optional() });
 
 @ApiTags('admin')
 @ApiBearerAuth()
@@ -45,7 +44,7 @@ export class AdminCatalogController {
   cancelCruise(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
-    @Body(new ZodValidationPipe(CancelCruiseBodySchema)) body: { reason?: string },
+    @Body(new ZodValidationPipe(AdminCancelReasonSchema)) body: AdminCancelReasonInput,
   ) {
     return this.adminCatalogService.cancelCruise(user.sub, id, body.reason);
   }

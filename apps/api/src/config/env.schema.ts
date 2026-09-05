@@ -25,15 +25,7 @@ export const envSchema = z
     JWT_ACCESS_EXPIRES_IN: z.string().default('15m'),
     JWT_REFRESH_EXPIRES_IN: z.string().default('7d'),
 
-    STORAGE_ENDPOINT: z.string().optional(),
-    STORAGE_REGION: z.string().optional(),
-    STORAGE_ACCESS_KEY: z.string().optional(),
-    STORAGE_SECRET_KEY: z.string().optional(),
-    STORAGE_BUCKET: z.string().optional(),
-
     LOG_LEVEL: z.string().default('info'),
-    SENTRY_DSN: z.string().optional(),
-    OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional(),
 
     WEB_APP_URL: z.string().url().default('http://localhost:3000'),
 

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { CreateEventInput, EventQuery, UpdateEventInput } from '@seapass/contracts';
 import { AuditLogService } from '../../../audit/audit-log.service';
@@ -56,6 +56,17 @@ export class EventsService {
   async update(organizerId: string, id: string, input: UpdateEventInput, actorUserId?: string) {
     const event = await this.findById(id);
     await this.cruisesService.findByIdForOrganizer(organizerId, event.cruise.id);
+
+    // `UpdateEventSchema`'s refine so recusa quando startAt/endAt vem juntos no mesmo PATCH —
+    // mesma limitacao de UpdateCruiseSchema/UpdateCouponSchema (Zod nao compara contra o valor
+    // JA salvo do campo que faltou no body). Backstop: revalida o par MERGED antes de escrever
+    // (achado e corrigido na revisao geral de 2026-09-05, junto da falta de validacao alguma no
+    // create, ja coberta pelo novo refine do proprio schema).
+    const mergedStartAt = input.startAt ?? event.startAt;
+    const mergedEndAt = input.endAt ?? event.endAt;
+    if (mergedEndAt <= mergedStartAt) {
+      throw new ConflictException('endAt precisa ser depois de startAt.');
+    }
 
     // So o que importa pro passageiro que ja reservou (ver "alteracao de evento" em
     // NotificationsService.notifyEventUpdated) — mudar so a descricao, por exemplo, nao merece

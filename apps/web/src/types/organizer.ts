@@ -124,5 +124,3 @@ export interface OrganizerExperience {
   isIncluded: boolean;
   cruise: { id: string; title: string };
 }
-
-export type { PaginatedResult as PageResult } from './cruise';

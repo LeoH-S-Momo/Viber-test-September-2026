@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ActivitiesModule } from '../activities/activities.module';
 import { TicketsModule } from '../tickets/tickets.module';
 import { AdminController } from './admin.controller';
 import { AdminService } from './admin.service';
@@ -20,9 +21,13 @@ import { AdminCouponsService } from './admin-coupons.service';
  * posse por organizador que nao fazem sentido aqui — o admin enxerga tudo).
  * `TicketsModule` importado so pelo cancelamento administrativo de reserva
  * (cascata de cancelamento de tickets, mesmo metodo do fluxo do passageiro).
+ * `ActivitiesModule` importado pelo mesmo motivo — cascata de reservas de
+ * evento/restaurante (ver ADR-0014), tanto no cancelamento individual
+ * (AdminSalesService) quanto no cascade de cancelamento de cruzeiro
+ * (AdminCatalogService).
  */
 @Module({
-  imports: [TicketsModule],
+  imports: [TicketsModule, ActivitiesModule],
   controllers: [AdminController, AdminUsersController, AdminCatalogController, AdminSalesController, AdminCouponsController],
   providers: [AdminService, AdminUsersService, AdminCatalogService, AdminSalesService, AdminCouponsService],
 })

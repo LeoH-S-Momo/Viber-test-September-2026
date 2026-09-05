@@ -85,7 +85,7 @@ Cobre os fluxos críticos ponta a ponta pelo browser real: descoberta → reserv
 
 ### Containerização — **Docker + Docker Compose**
 
-- `infra/docker-compose.yml` sobe a infraestrutura de desenvolvimento (Postgres, Redis, MinIO) — `web` e `api` rodam fora de container em dev para manter hot-reload rápido.
+- `infra/docker-compose.yml` sobe a infraestrutura de desenvolvimento (Postgres, Redis, MailHog) — `web` e `api` rodam fora de container em dev para manter hot-reload rápido.
 - `infra/docker-compose.test.yml` sobe infraestrutura efêmera para testes de integração/E2E (CI e local).
 - `infra/docker/{api,web}.Dockerfile` — builds multi-stage de produção (deps → build → runtime), imagem final enxuta (`node:20-alpine`, sem devDependencies).
 - Kubernetes fica deliberadamente fora do escopo v1 (ver backlog) — um container por app já é suficiente para o alvo de um teste técnico; `infra/k8s/` existe como placeholder documentando onde entraria se o projeto crescesse.
@@ -98,14 +98,25 @@ Pipeline em `.github/workflows/ci.yml`: lint + typecheck + testes unitários (to
 
 Logger estruturado em JSON, com overhead mínimo de performance (relevante em uma API que processa webhooks de pagamento simulado e jobs de fila). Integra com NestJS via `nestjs-pino`. Preferido a Winston pela performance e por já produzir JSON estruturado por padrão, que é o formato que ferramentas de observabilidade esperam.
 
-### Observabilidade — **OpenTelemetry (tracing) + Sentry (erros)**
+### Observabilidade — **logging estruturado (Pino) + health check agregado**
 
-- **Sentry** captura e agrupa exceções não tratadas em produção (frontend e backend), com contexto de request — retorno de investimento imediato mesmo em um projeto pequeno.
-- **OpenTelemetry** instrumenta tracing distribuído básico (request → service → Prisma query), exportável para qualquer backend compatível (Grafana Tempo, Jaeger, etc.) sem lock-in de vendor. Tratado como camada opcional/documentada (variável de ambiente vazia por padrão) para não inflar a complexidade de rodar o projeto localmente — é o item mais "avançado" da lista e existe para mostrar que o design *permite* observabilidade de produção, sem forçar todo avaliador a subir um Grafana local para rodar o projeto.
+Sentry e OpenTelemetry foram cogitados no planejamento inicial (variáveis `SENTRY_DSN`/
+`OTEL_EXPORTER_OTLP_ENDPOINT` chegaram a ser provisionadas no schema de ambiente), mas nenhum dos
+dois foi de fato integrado ao código — uma auditoria pré-entrega encontrou essas variáveis sem
+nenhum consumidor real e as removeu, junto do serviço MinIO (ver abaixo), em vez de manter
+configuração morta "por via das dúvidas". A observabilidade real desta fase é `nestjs-pino`
+(log estruturado com `req.id` correlacionando toda a requisição, `redact` cobrindo
+Authorization/Cookie) mais `GET /health` (agrega Postgres + Redis via `@nestjs/terminus`).
+Métricas/tracing ficam documentados como próximo passo (ver README, "Limitações conhecidas"),
+não como algo já parcialmente implementado.
 
-### Storage — **S3-compatible (MinIO em dev, S3/R2 em produção)**
+### Storage — **fora de escopo desta entrega**
 
-Necessário para imagens de navio/cabine/evento e, futuramente, anexos do ingresso digital. MinIO roda local via Docker Compose com a mesma API do S3, então o código de upload (`@aws-sdk/client-s3`) não muda entre dev e produção — só a variável de ambiente `STORAGE_ENDPOINT` muda.
+Cover image de navio/cruzeiro é hoje uma URL (`coverImageUrl: string`), não um upload de arquivo.
+MinIO e as variáveis `STORAGE_*` (S3-compatible) foram provisionados no início do projeto para
+esse cenário futuro, mas nunca chegaram a ter um endpoint de upload de verdade — removidos nesta
+revisão junto da observabilidade acima. Ver README ("Limitações conhecidas") para o que precisa
+existir antes de religar essa infraestrutura.
 
 ---
 
@@ -141,14 +152,14 @@ As três áreas (passageiro, organizador, admin) compartilham grande parte da UI
 ### Gerenciamento de variáveis de ambiente
 
 - Cada app tem seu próprio `.env.example` (`apps/api/.env.example`, `apps/web/.env.example`) documentando exatamente as variáveis que aquele processo usa — nunca um `.env` gigante compartilhado entre front e back.
-- A raiz tem um `.env.example` próprio, mas só para variáveis lidas pelo `infra/docker-compose.yml` (credenciais de Postgres/Redis/MinIO em dev).
+- A raiz tem um `.env.example` próprio, mas só para variáveis lidas pelo `infra/docker-compose.yml` (credenciais de Postgres/Redis/MailHog em dev).
 - `.env` real nunca é commitado (`.gitignore` cobre `.env*`, exceto os `.env.example`).
 - Na API, as variáveis são validadas em runtime por um schema Zod em `src/config` — a aplicação recusa subir se algo obrigatório faltar ou estiver malformado, em vez de falhar silenciosamente mais tarde.
 - Em produção, as variáveis são injetadas pela plataforma de deploy (ou pelo orquestrador de container), nunca lidas de um arquivo `.env` dentro da imagem.
 
 ### Configuração de desenvolvimento
 
-1. `docker compose -f infra/docker-compose.yml up -d` — sobe Postgres, Redis e MinIO.
+1. `docker compose -f infra/docker-compose.yml up -d` — sobe Postgres, Redis e MailHog.
 2. `pnpm install` na raiz — resolve todos os workspaces de uma vez.
 3. `pnpm db:migrate && pnpm db:seed` — aplica migrations e popula dados de exemplo.
 4. `pnpm dev` — Turborepo sobe `apps/web` (porta 3000) e `apps/api` (porta 3333) em paralelo, com hot-reload.

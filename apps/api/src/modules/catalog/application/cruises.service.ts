@@ -87,7 +87,20 @@ export class CruisesService {
   }
 
   async update(organizerId: string, id: string, input: UpdateCruiseInput, actorUserId?: string) {
-    await this.findByIdForOrganizer(organizerId, id);
+    const existing = await this.findByIdForOrganizer(organizerId, id);
+
+    // `UpdateCruiseSchema`'s refine so recusa quando as DUAS datas vem juntas no mesmo PATCH —
+    // Zod nao tem como comparar contra o valor JA salvo do campo que faltou no body (ver o
+    // proprio schema). Um PATCH so com `embarkationDate` (ou so `disembarkationDate`) passava
+    // sem checar nada contra a data existente do outro campo, podendo produzir um cruzeiro com
+    // desembarque antes do embarque sem erro nenhum — bug encontrado e corrigido na revisao
+    // geral de 2026-09-05. Backstop no service: revalida o par MERGED antes de escrever.
+    const mergedEmbarkation = input.embarkationDate ?? existing.embarkationDate;
+    const mergedDisembarkation = input.disembarkationDate ?? existing.disembarkationDate;
+    if (mergedDisembarkation <= mergedEmbarkation) {
+      throw new ConflictException('A data de desembarque precisa ser depois da data de embarque.');
+    }
+
     const cruise = await this.cruisesRepository.update(id, input);
     await this.auditLog.record({
       actorUserId: actorUserId ?? null,

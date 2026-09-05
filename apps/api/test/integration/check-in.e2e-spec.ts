@@ -295,7 +295,7 @@ describe('Digital ticket + check-in (integration)', () => {
     expect(confirm.body.message).toMatch(/nao esta confirmada/);
   });
 
-  it('recusa (403) um ticket de um cruzeiro de OUTRO organizador — nunca revela dados do ticket a quem nao e dono', async () => {
+  it('nunca revela dados de um ticket de um cruzeiro de OUTRO organizador — lookup devolve INVALID (nao 403) e confirm devolve 404 (nao 403), ver ADR-0005', async () => {
     const code = await confirmBookingAndGetTicketCode('Isolamento Organizador', 'TK000004');
 
     const otherOrgLabel = unique('otherorg');
@@ -311,8 +311,11 @@ describe('Digital ticket + check-in (integration)', () => {
       .expect(201);
     const otherOrgAuth = { Authorization: `Bearer ${otherOrg.body.accessToken}` };
 
-    await request(server()).post('/check-in/lookup').set(otherOrgAuth).send({ code }).expect(403);
-    await request(server()).post('/check-in/confirm').set(otherOrgAuth).send({ code }).expect(403);
+    // Um ticket de verdade, so que de outro organizador, precisa parecer IDENTICO a um codigo
+    // que nunca existiu — nem 403 (revelaria "existe, so que nao e seu") nem os dados do ticket.
+    const lookup = await request(server()).post('/check-in/lookup').set(otherOrgAuth).send({ code }).expect(200);
+    expect(lookup.body).toEqual({ outcome: 'INVALID', ticket: null });
+    await request(server()).post('/check-in/confirm').set(otherOrgAuth).send({ code }).expect(404);
 
     // O dono de verdade continua conseguindo.
     await request(server()).post('/check-in/lookup').set(staffAuth).send({ code }).expect(200);

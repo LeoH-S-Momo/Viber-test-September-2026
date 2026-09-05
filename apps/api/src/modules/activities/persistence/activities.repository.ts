@@ -112,6 +112,26 @@ export class ActivitiesRepository {
     });
   }
 
+  /**
+   * Cascata de cancelamento de RESERVA (nao de uma atividade isolada) —
+   * chamado quando a `Booking` inteira e cancelada (pelo passageiro ou por
+   * um admin), pra fechar as reservas de evento/restaurante que ficariam
+   * CONFIRMED presas pra sempre e continuariam contando contra a capacidade
+   * do evento/horario indefinidamente. Bulk (`updateMany`, nao um loop),
+   * mesmo principio de `AdminCatalogService.cancelCruise` pros tickets.
+   */
+  async cancelReservationsForBookings(tx: Prisma.TransactionClient, bookingIds: string[]): Promise<void> {
+    if (bookingIds.length === 0) return;
+    await tx.eventReservation.updateMany({
+      where: { bookingId: { in: bookingIds }, status: ACTIVE },
+      data: { status: ActivityReservationStatus.CANCELLED, cancelledAt: new Date() },
+    });
+    await tx.diningReservation.updateMany({
+      where: { bookingId: { in: bookingIds }, status: ACTIVE },
+      data: { status: ActivityReservationStatus.CANCELLED, cancelledAt: new Date() },
+    });
+  }
+
   findEventReservationById(id: string) {
     return this.prisma.eventReservation.findUnique({ where: { id } });
   }

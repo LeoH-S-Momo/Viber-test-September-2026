@@ -62,6 +62,7 @@ function buildService() {
   const configService = { getOrThrow: jest.fn().mockReturnValue(15) };
   const paymentGateway = { charge: jest.fn(), retrieve: jest.fn() };
   const ticketsService = { cancelTicketsForBooking: jest.fn() };
+  const activitiesService = { cancelReservationsForBookings: jest.fn() };
   const holdExpirationQueue = { add: jest.fn(), remove: jest.fn() };
   const ticketIssuanceQueue = { add: jest.fn(), remove: jest.fn() };
   const auditLog = { record: jest.fn() };
@@ -73,6 +74,7 @@ function buildService() {
     configService as never,
     paymentGateway as never,
     ticketsService as never,
+    activitiesService as never,
     holdExpirationQueue as never,
     ticketIssuanceQueue as never,
     auditLog as never,
@@ -87,6 +89,7 @@ function buildService() {
     configService,
     paymentGateway,
     ticketsService,
+    activitiesService,
     holdExpirationQueue,
     ticketIssuanceQueue,
     auditLog,

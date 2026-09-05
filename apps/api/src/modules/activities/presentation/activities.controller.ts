@@ -3,10 +3,12 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { RoleKey } from '@prisma/client';
 import {
   CreateDiningSlotSchema,
+  DiningAvailabilityQuerySchema,
   ReserveDiningSchema,
   ReserveEventSchema,
   UpdateDiningSlotSchema,
   type CreateDiningSlotInput,
+  type DiningAvailabilityQuery,
   type ReserveDiningInput,
   type ReserveEventInput,
   type UpdateDiningSlotInput,
@@ -37,8 +39,11 @@ export class ActivitiesController {
 
   @Public()
   @Get('dining-slots/:diningSlotId/availability')
-  diningAvailability(@Param('diningSlotId') diningSlotId: string, @Query('date') date: string) {
-    return this.activitiesService.getDiningAvailability(diningSlotId, new Date(date));
+  diningAvailability(
+    @Param('diningSlotId') diningSlotId: string,
+    @Query(new ZodValidationPipe(DiningAvailabilityQuerySchema)) query: DiningAvailabilityQuery,
+  ) {
+    return this.activitiesService.getDiningAvailability(diningSlotId, query.date);
   }
 
   @ApiBearerAuth()

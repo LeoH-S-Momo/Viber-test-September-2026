@@ -1,4 +1,4 @@
-import { ConflictException, UnauthorizedException } from '@nestjs/common';
+import { ConflictException, Logger, UnauthorizedException } from '@nestjs/common';
 import { RoleKey } from '@prisma/client';
 import { AuthService } from '../../src/modules/auth/auth.service';
 
@@ -139,6 +139,23 @@ describe('AuthService', () => {
 
       expect(prisma.passwordResetToken.create).toHaveBeenCalledTimes(1);
       expect(result.devToken).toEqual(expect.any(String));
+    });
+
+    it('never logs the raw reset token in production, even though devToken is still returned for the controller to strip', async () => {
+      const originalEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'production';
+      const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      try {
+        const { service, prisma } = buildDeps();
+        prisma.user.findUnique.mockResolvedValue({ id: 'u1', email: 'a@a.com' });
+
+        await service.forgotPassword('a@a.com');
+
+        expect(warnSpy).not.toHaveBeenCalled();
+      } finally {
+        process.env.NODE_ENV = originalEnv;
+        warnSpy.mockRestore();
+      }
     });
 
     it('rejects an unknown/expired/used reset token', async () => {

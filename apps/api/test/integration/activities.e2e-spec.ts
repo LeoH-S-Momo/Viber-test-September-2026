@@ -482,10 +482,75 @@ describe('Onboard activities — event/dining reservations (integration)', () =>
       const after = await request(server()).get(`/events/${eventId}/availability`).expect(200);
       expect(after.body).toEqual({ capacity: 10, reserved: 3, available: 7 });
     });
+
+    it('reflects reserved party size for a dining slot on a given date', async () => {
+      const diningSlotId = await createDiningSlot(10, '1970-01-01T19:00:00.000Z', '1970-01-01T21:00:00.000Z');
+      const before = await request(server())
+        .get(`/dining-slots/${diningSlotId}/availability`)
+        .query({ date: '2027-10-03T00:00:00.000Z' })
+        .expect(200);
+      expect(before.body).toEqual({ capacity: 10, reserved: 0, available: 10 });
+
+      const bookingId = await confirmedBooking(passengerTokens[0]!);
+      await request(server())
+        .post(`/bookings/${bookingId}/dining-reservations`)
+        .set(auth(passengerTokens[0]!))
+        .send({ diningSlotId, partySize: 4, reservationDate: '2027-10-03T00:00:00.000Z' })
+        .expect(200);
+
+      const after = await request(server())
+        .get(`/dining-slots/${diningSlotId}/availability`)
+        .query({ date: '2027-10-03T00:00:00.000Z' })
+        .expect(200);
+      expect(after.body).toEqual({ capacity: 10, reserved: 4, available: 6 });
+    });
+
+    it('rejects a non-parseable date query param with 400 instead of a raw 500', async () => {
+      const diningSlotId = await createDiningSlot(10, '1970-01-01T19:00:00.000Z', '1970-01-01T21:00:00.000Z');
+      await request(server())
+        .get(`/dining-slots/${diningSlotId}/availability`)
+        .query({ date: 'nao-e-uma-data' })
+        .expect(400);
+    });
+
+    it('cancelling the whole booking frees the capacity held by its event/dining reservations (bug found and fixed in the 2026-09-05 general review)', async () => {
+      const eventId = await createEvent(10, '2027-10-02T20:00:00.000Z', '2027-10-02T22:00:00.000Z');
+      const diningSlotId = await createDiningSlot(10, '1970-01-01T19:00:00.000Z', '1970-01-01T21:00:00.000Z');
+      const bookingId = await confirmedBooking(passengerTokens[0]!);
+
+      await request(server())
+        .post(`/bookings/${bookingId}/event-reservations/${eventId}`)
+        .set(auth(passengerTokens[0]!))
+        .send({ partySize: 3 })
+        .expect(200);
+      await request(server())
+        .post(`/bookings/${bookingId}/dining-reservations`)
+        .set(auth(passengerTokens[0]!))
+        .send({ diningSlotId, partySize: 4, reservationDate: '2027-10-03T00:00:00.000Z' })
+        .expect(200);
+
+      const beforeCancel = await request(server()).get(`/events/${eventId}/availability`).expect(200);
+      expect(beforeCancel.body).toEqual({ capacity: 10, reserved: 3, available: 7 });
+
+      await request(server())
+        .post(`/bookings/${bookingId}/cancel`)
+        .set(auth(passengerTokens[0]!))
+        .send({})
+        .expect(200);
+
+      const afterEvent = await request(server()).get(`/events/${eventId}/availability`).expect(200);
+      expect(afterEvent.body).toEqual({ capacity: 10, reserved: 0, available: 10 });
+
+      const afterDining = await request(server())
+        .get(`/dining-slots/${diningSlotId}/availability`)
+        .query({ date: '2027-10-03T00:00:00.000Z' })
+        .expect(200);
+      expect(afterDining.body).toEqual({ capacity: 10, reserved: 0, available: 10 });
+    });
   });
 
   describe('dining slot management (organizer)', () => {
-    it('forbids creating a dining slot for a restaurant owned by a different organizer', async () => {
+    it('rejects (404, not 403 — see ADR-0005) creating a dining slot for a restaurant owned by a different organizer', async () => {
       const otherOrg = await request(server())
         .post('/auth/register/organizer')
         .send({
@@ -501,7 +566,7 @@ describe('Onboard activities — event/dining reservations (integration)', () =>
         .post(`/restaurants/${restaurantId}/dining-slots`)
         .set(auth(otherOrg.body.accessToken))
         .send({ label: 'Invasao', startTime: '1970-01-01T19:00:00.000Z', endTime: '1970-01-01T21:00:00.000Z', capacity: 10 })
-        .expect(403);
+        .expect(404);
     });
 
     it('updates an existing dining slot capacity', async () => {

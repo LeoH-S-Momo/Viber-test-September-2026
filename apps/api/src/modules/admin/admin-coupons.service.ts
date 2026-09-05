@@ -85,6 +85,19 @@ export class AdminCouponsService {
     }
     const { applicableCruiseIds, ...rest } = input;
 
+    // `UpdateCouponSchema` e um `.partial()` do schema SEM o `.refine()` de `CreateCouponSchema`
+    // (Zod nao consegue validar um PATCH parcial contra o valor JA salvo do outro campo) — um
+    // PATCH so com `validFrom` (ou so `validUntil`) passava pelo Zod sem checar nada contra o
+    // valor existente do outro, podendo produzir `validFrom > validUntil` sem erro nenhum, o que
+    // tornava o cupom permanentemente irredimivel (CouponPolicy.validate nunca acha um `now` que
+    // satisfaca nenhum dos dois lados) — bug encontrado e corrigido na revisao geral de
+    // 2026-09-05. Backstop no service: revalida o par MERGED antes de escrever.
+    const mergedValidFrom = rest.validFrom ?? existing.validFrom;
+    const mergedValidUntil = rest.validUntil ?? existing.validUntil;
+    if (mergedValidUntil <= mergedValidFrom) {
+      throw new ConflictException('validUntil precisa ser depois de validFrom.');
+    }
+
     const coupon = await this.prisma.$transaction(async (tx) => {
       if (applicableCruiseIds) {
         await tx.couponCruise.deleteMany({ where: { couponId: id } });

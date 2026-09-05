@@ -26,6 +26,10 @@ export class TicketsRepository {
     return this.prisma.ticket.findMany({
       where: { bookingGuest: { booking: { userId } } },
       orderBy: { issuedAt: 'desc' },
+      // Sem paginacao de verdade (GET /tickets/me devolve um array simples, nao um
+      // PaginatedResult) — um teto generoso evita uma query sem limite pra quem acumular
+      // muitas viagens/hospedes ao longo do tempo, sem quebrar o contrato atual do endpoint.
+      take: 50,
       include: {
         bookingGuest: {
           select: {

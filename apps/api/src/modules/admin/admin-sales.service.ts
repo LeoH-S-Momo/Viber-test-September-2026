@@ -6,6 +6,7 @@ import { PrismaService } from '../../database/prisma/prisma.service';
 import { toPageResult, toSkipTake } from '../catalog/domain/pagination';
 import { AuditLogService } from '../../audit/audit-log.service';
 import { DomainEvent } from '../../domain-events/domain-events';
+import { ActivitiesService } from '../activities/application/activities.service';
 import { TicketsService } from '../tickets/application/tickets.service';
 
 /** Estados de reserva que ainda podem ser cancelados por um admin — os terminais (ja resolvidos) nao. */
@@ -18,6 +19,7 @@ export class AdminSalesService {
     private readonly prisma: PrismaService,
     private readonly auditLog: AuditLogService,
     private readonly ticketsService: TicketsService,
+    private readonly activitiesService: ActivitiesService,
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
@@ -97,6 +99,10 @@ export class AdminSalesService {
         },
       });
       await this.ticketsService.cancelTicketsForBooking(tx, id);
+      // Mesma cascata do cancelamento pelo passageiro (ver BookingsService.cancelBooking) —
+      // sem isto, reservas de evento/restaurante ficavam CONFIRMED presas pra sempre mesmo com
+      // a reserva cancelada por um admin (bug encontrado e corrigido na revisao geral de 2026-09-05).
+      await this.activitiesService.cancelReservationsForBookings(tx, [id]);
       return result;
     });
 

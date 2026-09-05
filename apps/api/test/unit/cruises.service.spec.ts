@@ -129,6 +129,45 @@ describe('CruisesService', () => {
     });
   });
 
+  describe('update', () => {
+    const existing = {
+      id: 'c1',
+      organizerId: 'org-mine',
+      embarkationDate: new Date('2027-01-01'),
+      disembarkationDate: new Date('2027-01-05'),
+    };
+
+    it('rejects a PATCH with only embarkationDate when it would land after the existing disembarkationDate (bug found and fixed in the 2026-09-05 general review)', async () => {
+      const { service, cruisesRepository } = buildService();
+      cruisesRepository.findById.mockResolvedValue(existing);
+
+      await expect(
+        service.update('org-mine', 'c1', { embarkationDate: new Date('2027-02-01') }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(cruisesRepository.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects a PATCH with only disembarkationDate when it would land before the existing embarkationDate', async () => {
+      const { service, cruisesRepository } = buildService();
+      cruisesRepository.findById.mockResolvedValue(existing);
+
+      await expect(
+        service.update('org-mine', 'c1', { disembarkationDate: new Date('2026-12-01') }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(cruisesRepository.update).not.toHaveBeenCalled();
+    });
+
+    it('allows a single-field PATCH that keeps the merged pair valid', async () => {
+      const { service, cruisesRepository } = buildService();
+      cruisesRepository.findById.mockResolvedValue(existing);
+      cruisesRepository.update.mockResolvedValue({ ...existing, title: 'Novo titulo' });
+
+      await service.update('org-mine', 'c1', { title: 'Novo titulo' });
+
+      expect(cruisesRepository.update).toHaveBeenCalledWith('c1', { title: 'Novo titulo' });
+    });
+  });
+
   describe('getDeckMap', () => {
     it('cross-references cabins with this cruise pricing and active bookings', async () => {
       const { service, cruisesRepository, decksRepository, cabinsRepository } = buildService();

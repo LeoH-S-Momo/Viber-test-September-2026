@@ -13,6 +13,7 @@ import { CABIN_HOLD_EXPIRATION_JOB, CABIN_HOLD_EXPIRATION_QUEUE } from '../../..
 import { TICKET_ISSUANCE_JOB, TICKET_ISSUANCE_QUEUE } from '../../../jobs/ticket-issuance-queue';
 import { BookingGuestsPolicy } from '../domain/booking-guests.policy';
 import { BookingLifecyclePolicy } from '../domain/booking-lifecycle.policy';
+import { ActivitiesService } from '../../activities/application/activities.service';
 import { ActivityCapacityPolicy } from '../../activities/domain/activity-capacity.policy';
 import { CouponPolicy } from '../../pricing/domain/coupon.policy';
 import { PricingEngine } from '../../pricing/domain/pricing-engine';
@@ -58,6 +59,7 @@ export class BookingsService {
     private readonly configService: ConfigService,
     @Inject(PAYMENT_GATEWAY) private readonly paymentGateway: PaymentGateway,
     private readonly ticketsService: TicketsService,
+    private readonly activitiesService: ActivitiesService,
     @InjectQueue(CABIN_HOLD_EXPIRATION_QUEUE) private readonly holdExpirationQueue: Queue,
     @InjectQueue(TICKET_ISSUANCE_QUEUE) private readonly ticketIssuanceQueue: Queue,
     private readonly auditLog: AuditLogService,
@@ -468,6 +470,10 @@ export class BookingsService {
       // reserva precisa invalidar tambem os tickets, senao eles continuariam ISSUED e passariam
       // no check-in mesmo com a reserva cancelada. No-op (0 linhas) se nunca chegou a CONFIRMED.
       await this.ticketsService.cancelTicketsForBooking(tx, bookingId);
+      // Mesmo motivo: reservas de evento/restaurante (ver ADR-0014) ficariam CONFIRMED presas
+      // pra sempre, continuando a contar contra a capacidade do evento/horario mesmo com a
+      // viagem cancelada — achado na revisao geral de 2026-09-05 (bug encontrado e corrigido).
+      await this.activitiesService.cancelReservationsForBookings(tx, [bookingId]);
       return cancelled;
     });
 

@@ -28,4 +28,6 @@ COPY --from=build --chown=node:node /app/apps/web/public ./apps/web/public
 # na imagem base node:alpine (uid 1000), nao precisa ser criado.
 USER node
 EXPOSE 3000
+HEALTHCHECK --interval=10s --timeout=5s --start-period=10s --retries=5 \
+  CMD node -e "require('http').get('http://localhost:3000', (res) => process.exit(res.statusCode < 500 ? 0 : 1)).on('error', () => process.exit(1))"
 CMD ["node", "apps/web/server.js"]

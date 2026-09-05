@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as QRCode from 'qrcode';
 import { Prisma, TicketStatus, type BookingStatus } from '@prisma/client';
@@ -84,10 +84,15 @@ export class TicketsService {
    * erro HTTP, porque e um resultado esperado da operacao de busca.
    */
   async lookupForCheckIn(organizerId: string, code: string): Promise<CheckInLookupResult> {
-    const ticket = await this.ticketsRepository.findByCodeForCheckIn(code);
-    if (ticket) {
-      this.assertBelongsToOrganizer(ticket, organizerId);
-    }
+    const found = await this.ticketsRepository.findByCodeForCheckIn(code);
+    // Um ticket de OUTRO organizador conta como "nao encontrado" aqui, nao como erro — mesmo
+    // principio do comentario acima (nunca lanca por codigo invalido) e de ADR-0005 (nao
+    // confirmar a existencia de um recurso a quem nao e dono): um ticket de verdade, so que de
+    // outro organizador, tem que parecer identico a um codigo que nunca existiu, senao o outcome
+    // por si so revelaria "existe, so que nao e seu" (bug encontrado e corrigido na revisao de
+    // 2026-09-05 — antes lancava ForbiddenException aqui, contradizendo o proprio comentario
+    // desta funcao).
+    const ticket = found && found.bookingGuest.booking.cruise.organizerId === organizerId ? found : null;
     return {
       outcome: CheckInPolicy.evaluate(ticket ? this.toCandidate(ticket) : null),
       ticket: ticket ? this.toCheckInView(ticket) : null,
@@ -114,10 +119,11 @@ export class TicketsService {
         throw new NotFoundException('Ticket nao encontrado.');
       }
       const ticket = await this.ticketsRepository.findByIdForCheckIn(tx, locked.id);
-      if (!ticket) {
+      // Mesma mensagem/status de "nao encontrado" pra um ticket de outro organizador — ver
+      // ADR-0005 (404, nao 403, pra nao confirmar a outro organizador que o ticket existe).
+      if (!ticket || ticket.bookingGuest.booking.cruise.organizerId !== organizerId) {
         throw new NotFoundException('Ticket nao encontrado.');
       }
-      this.assertBelongsToOrganizer(ticket, organizerId);
       CheckInPolicy.assertCanCheckIn(this.toCandidate(ticket));
 
       await this.ticketsRepository.createCheckIn(tx, { ticketId: ticket.id, staffUserId, location });
@@ -147,12 +153,6 @@ export class TicketsService {
    */
   cancelTicketsForBooking(tx: Prisma.TransactionClient, bookingId: string) {
     return this.ticketsRepository.cancelTicketsForBooking(tx, bookingId);
-  }
-
-  private assertBelongsToOrganizer(ticket: TicketWithCheckInContext, organizerId: string): void {
-    if (ticket.bookingGuest.booking.cruise.organizerId !== organizerId) {
-      throw new ForbiddenException('Este ticket nao pertence a um cruzeiro do seu organizador.');
-    }
   }
 
   private toCandidate(ticket: TicketWithCheckInContext): CheckInCandidate {

@@ -1,4 +1,4 @@
-import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { BookingStatus, TicketStatus } from '@prisma/client';
 import { TicketsService } from '../../src/modules/tickets/application/tickets.service';
 import type { TicketWithCheckInContext } from '../../src/modules/tickets/persistence/tickets.repository';
@@ -125,11 +125,14 @@ describe('TicketsService', () => {
       expect(result.outcome).toBe('ALREADY_USED');
     });
 
-    it('rejeita (403) um ticket de um cruzeiro de OUTRO organizador, sem revelar o resultado da validacao', async () => {
+    it('devolve outcome INVALID (nunca lanca) pra um ticket de verdade de OUTRO organizador — identico a um codigo inexistente (ver ADR-0005, bug encontrado e corrigido na revisao de 2026-09-05)', async () => {
       const { service, ticketsRepository } = buildService();
       ticketsRepository.findByCodeForCheckIn.mockResolvedValue(buildTicket({ organizerId: 'org-2' }));
 
-      await expect(service.lookupForCheckIn('org-1', 'TICKET-abc')).rejects.toBeInstanceOf(ForbiddenException);
+      const result = await service.lookupForCheckIn('org-1', 'TICKET-abc');
+
+      expect(result.outcome).toBe('INVALID');
+      expect(result.ticket).toBeNull();
     });
   });
 
@@ -179,12 +182,12 @@ describe('TicketsService', () => {
       expect(ticketsRepository.createCheckIn).not.toHaveBeenCalled();
     });
 
-    it('rejeita (403) um ticket de um cruzeiro de outro organizador antes de checar elegibilidade', async () => {
+    it('rejeita (404, nao 403 — ver ADR-0005) um ticket de um cruzeiro de outro organizador antes de checar elegibilidade', async () => {
       const { service, ticketsRepository } = buildService();
       ticketsRepository.lockByCodeForUpdate.mockResolvedValue({ id: 'ticket-1' });
       ticketsRepository.findByIdForCheckIn.mockResolvedValue(buildTicket({ organizerId: 'org-2' }));
 
-      await expect(service.confirmCheckIn('org-1', 'staff-1', 'TICKET-abc')).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(service.confirmCheckIn('org-1', 'staff-1', 'TICKET-abc')).rejects.toBeInstanceOf(NotFoundException);
       expect(ticketsRepository.createCheckIn).not.toHaveBeenCalled();
     });
   });

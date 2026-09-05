@@ -1,6 +1,6 @@
-import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { RoleKey } from '@prisma/client';
+import { Prisma, RoleKey } from '@prisma/client';
 import { PrismaService } from '../../../database/prisma/prisma.service';
 import { requireOrganizerId } from '../../../common/utils/auth-context';
 import { DomainEvent } from '../../../domain-events/domain-events';
@@ -105,6 +105,15 @@ export class ActivitiesService {
       }
       return this.activitiesRepository.cancelEventReservation(tx, reservationId);
     });
+  }
+
+  /**
+   * Chamado por quem cancela a RESERVA inteira (BookingsService/AdminSalesService), na MESMA
+   * transacao — nunca sozinho. Aceita uma lista pra tambem servir o cascade de
+   * AdminCatalogService.cancelCruise (varias reservas de uma vez).
+   */
+  cancelReservationsForBookings(tx: Prisma.TransactionClient, bookingIds: string[]) {
+    return this.activitiesRepository.cancelReservationsForBookings(tx, bookingIds);
   }
 
   listMyEventReservations(userId: string) {
@@ -222,10 +231,11 @@ export class ActivitiesService {
     await this.assertShipOwnedByOrganizer(restaurant.shipId, organizerId);
   }
 
+  /** 404, nao 403 (ver ADR-0005) — nao confirma a outro organizador que o navio existe. */
   private async assertShipOwnedByOrganizer(shipId: string, organizerId: string): Promise<void> {
     const ship = await this.prisma.ship.findUnique({ where: { id: shipId }, select: { organizerId: true } });
     if (!ship || ship.organizerId !== organizerId) {
-      throw new ForbiddenException('Este navio não pertence ao seu organizador.');
+      throw new NotFoundException('Navio não encontrado.');
     }
   }
 }

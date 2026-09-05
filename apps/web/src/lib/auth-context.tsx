@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { getApiBaseUrl } from './api-client';
 import type { AuthResult, AuthUser } from '@/types/auth';
 
@@ -48,31 +48,51 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  const refreshSession = useCallback(async (): Promise<boolean> => {
-    try {
-      const response = await fetch(`${getApiBaseUrl()}/auth/refresh`, {
-        method: 'POST',
-        credentials: 'include',
-      });
-      if (!response.ok) {
-        // Refresh token ausente/expirado/revogado — a sessao acabou de verdade (nao um erro de
-        // rede transitorio). Limpa o estado local pra RequireRole mandar pro /login de forma
-        // limpa, em vez de deixar o app preso repetindo requests autenticadas que nunca vao
-        // funcionar de novo.
-        setAccessToken(null);
-        setUser(null);
-        return false;
-      }
-      const result = await parseAuthResult(response);
-      setAccessToken(result.accessToken);
-      setUser(result.user);
-      return true;
-    } catch {
-      // Falha de rede (API fora do ar momentaneamente) — mantem a sessao atual como esta e
-      // tenta de novo no proximo tick do timer, em vez de derrubar o usuario por uma
-      // instabilidade passageira.
-      return false;
+  // Refresh em voo — o interval de 10min e o listener de visibilitychange abaixo podem disparar
+  // quase juntos (a aba volta ao foco bem na hora que o timer tambem ia rodar). Sem deduplicar,
+  // duas chamadas concorrentes a /auth/refresh com o MESMO cookie de refresh token acionam a
+  // deteccao de reuso do backend (rotacao de token — ver TokensService.rotateRefreshToken): a
+  // primeira revoga o token antigo e emite um novo; a segunda, ainda em voo com o token JA
+  // revogado, e tratada como possivel roubo/reuso e revoga TODOS os tokens do usuario — deslogando
+  // uma sessao legitima no meio do uso (bug encontrado e corrigido na revisao geral de
+  // 2026-09-05). Guardar a Promise em voo faz a segunda chamada esperar e reusar o MESMO
+  // resultado da primeira, em vez de disparar uma segunda request.
+  const inFlightRefresh = useRef<Promise<boolean> | null>(null);
+
+  const refreshSession = useCallback((): Promise<boolean> => {
+    if (inFlightRefresh.current) {
+      return inFlightRefresh.current;
     }
+    const attempt = (async (): Promise<boolean> => {
+      try {
+        const response = await fetch(`${getApiBaseUrl()}/auth/refresh`, {
+          method: 'POST',
+          credentials: 'include',
+        });
+        if (!response.ok) {
+          // Refresh token ausente/expirado/revogado — a sessao acabou de verdade (nao um erro de
+          // rede transitorio). Limpa o estado local pra RequireRole mandar pro /login de forma
+          // limpa, em vez de deixar o app preso repetindo requests autenticadas que nunca vao
+          // funcionar de novo.
+          setAccessToken(null);
+          setUser(null);
+          return false;
+        }
+        const result = await parseAuthResult(response);
+        setAccessToken(result.accessToken);
+        setUser(result.user);
+        return true;
+      } catch {
+        // Falha de rede (API fora do ar momentaneamente) — mantem a sessao atual como esta e
+        // tenta de novo no proximo tick do timer, em vez de derrubar o usuario por uma
+        // instabilidade passageira.
+        return false;
+      } finally {
+        inFlightRefresh.current = null;
+      }
+    })();
+    inFlightRefresh.current = attempt;
+    return attempt;
   }, []);
 
   useEffect(() => {

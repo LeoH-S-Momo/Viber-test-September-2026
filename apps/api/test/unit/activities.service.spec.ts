@@ -1,4 +1,4 @@
-import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { RoleKey } from '@prisma/client';
 import { ActivitiesService } from '../../src/modules/activities/application/activities.service';
 
@@ -226,7 +226,7 @@ describe('ActivitiesService', () => {
       expect(result).toEqual({ id: 'slot-new' });
     });
 
-    it('forbids creating a slot for a restaurant on a ship owned by another organizer', async () => {
+    it('rejects (404, not 403 — see ADR-0005) creating a slot for a restaurant on a ship owned by another organizer', async () => {
       const { service, prisma } = buildService();
       (prisma.restaurant.findUnique as jest.Mock).mockResolvedValue({ shipId: 'ship-1' });
       (prisma.ship.findUnique as jest.Mock).mockResolvedValue({ organizerId: 'org-outro' });
@@ -238,7 +238,7 @@ describe('ActivitiesService', () => {
           endTime: new Date(),
           capacity: 30,
         }),
-      ).rejects.toBeInstanceOf(ForbiddenException);
+      ).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 });

@@ -687,6 +687,10 @@ model BookingExperience {
   experience Experience @relation(fields: [experienceId], references: [id], onDelete: Restrict)
 
   @@unique([bookingId, experienceId])
+  /// `bookingsRepository.sumActiveExperiencePartySize(Plain)` filtra so por experienceId, sem
+  /// bookingId — o unique acima nao serve pra essa consulta (experienceId nao e a coluna lider).
+  /// Mesmo indice que EventReservation/DiningReservation ja tem pro mesmo padrao de consulta.
+  @@index([experienceId])
   @@map("booking_experiences")
 }
 

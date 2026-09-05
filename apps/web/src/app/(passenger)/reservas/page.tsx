@@ -45,6 +45,7 @@ function TripView() {
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [tickets, setTickets] = useState<MyTicket[]>([]);
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
+  const [cancelError, setCancelError] = useState<string | null>(null);
 
   const load = useCallback(
     async (silent = false) => {
@@ -157,6 +158,11 @@ function TripView() {
           icon={<CalendarCheck className="h-6 w-6 text-accent-600" aria-hidden="true" />}
           description="Onde você precisa estar e o que já está marcado — embarque, paradas de porto, eventos e restaurantes reservados."
         />
+        {cancelError && (
+          <p role="alert" className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+            {cancelError}
+          </p>
+        )}
         {catalog && timeline ? (
           <TripTimelineView
             days={timeline.days}
@@ -164,14 +170,27 @@ function TripView() {
             busyIds={busyIds}
             onCancelEvent={(reservationId) =>
               withBusy(reservationId, async () => {
+                setCancelError(null);
                 const result = await cancelEventReservation(accessToken, booking.id, reservationId);
-                if (result.ok) await load(true);
+                if (result.ok) {
+                  await load(true);
+                } else {
+                  // Sem isto, uma falha (ex.: fora do prazo de cancelamento) so revertia o
+                  // spinner pro estado anterior, sem explicar nada ao passageiro (bug encontrado
+                  // e corrigido na revisao geral de 2026-09-05).
+                  setCancelError(result.message);
+                }
               })
             }
             onCancelDining={(reservationId) =>
               withBusy(reservationId, async () => {
+                setCancelError(null);
                 const result = await cancelDiningReservation(accessToken, booking.id, reservationId);
-                if (result.ok) await load(true);
+                if (result.ok) {
+                  await load(true);
+                } else {
+                  setCancelError(result.message);
+                }
               })
             }
           />

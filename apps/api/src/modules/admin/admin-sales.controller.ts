@@ -3,22 +3,21 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { RoleKey } from '@prisma/client';
 import {
   AdminBookingsQuerySchema,
+  AdminCancelReasonSchema,
   AdminCheckInsQuerySchema,
   AdminPaymentsQuerySchema,
   AdminTicketsQuerySchema,
   type AdminBookingsQuery,
+  type AdminCancelReasonInput,
   type AdminCheckInsQuery,
   type AdminPaymentsQuery,
   type AdminTicketsQuery,
 } from '@seapass/contracts';
-import { z } from 'zod';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import type { AuthenticatedUser } from '../auth/types/jwt-payload';
 import { AdminSalesService } from './admin-sales.service';
-
-const CancelBookingBodySchema = z.object({ reason: z.string().max(300).optional() });
 
 @ApiTags('admin')
 @ApiBearerAuth()
@@ -41,7 +40,7 @@ export class AdminSalesController {
   cancelBooking(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
-    @Body(new ZodValidationPipe(CancelBookingBodySchema)) body: { reason?: string },
+    @Body(new ZodValidationPipe(AdminCancelReasonSchema)) body: AdminCancelReasonInput,
   ) {
     return this.adminSalesService.cancelBooking(user.sub, id, body.reason);
   }

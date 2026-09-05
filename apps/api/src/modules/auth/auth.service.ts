@@ -178,10 +178,17 @@ export class AuthService {
       },
     });
 
-    this.logger.warn(
-      `[DEV] Token de recuperacao de senha para ${email}: ${rawToken} ` +
-        '(em producao isto seria enviado por e-mail, nunca logado ou retornado na API)',
-    );
+    // So loga o token cru fora de producao (mesmo guard do controller pro `devToken` da
+    // resposta) — sem isto, todo POST /auth/forgot-password gravava a credencial que da acesso
+    // total a troca de senha da conta em texto puro no log estruturado, em qualquer ambiente,
+    // incluindo producao (mesma classe de bug do JWT/cookie em log ja corrigida — ver
+    // docs/architecture/decisions/0020-hardening.md — so que pra este segredo especifico).
+    if (process.env.NODE_ENV !== 'production') {
+      this.logger.warn(
+        `[DEV] Token de recuperacao de senha para ${email}: ${rawToken} ` +
+          '(em producao isto seria enviado por e-mail, nunca logado ou retornado na API)',
+      );
+    }
 
     return { devToken: rawToken };
   }

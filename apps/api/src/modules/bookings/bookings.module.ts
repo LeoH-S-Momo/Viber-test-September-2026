@@ -4,6 +4,7 @@ import { CabinHoldExpirationProcessor } from '../../jobs/cabin-hold-expiration.p
 import { CABIN_HOLD_EXPIRATION_QUEUE } from '../../jobs/cabin-hold-queue';
 import { TicketIssuanceProcessor } from '../../jobs/ticket-issuance.processor';
 import { TICKET_ISSUANCE_QUEUE } from '../../jobs/ticket-issuance-queue';
+import { ActivitiesModule } from '../activities/activities.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { TicketsModule } from '../tickets/tickets.module';
 import { BookingsController } from './presentation/bookings.controller';
@@ -20,9 +21,12 @@ import { BookingsRepository } from './persistence/bookings.repository';
  * sendo so a convencao de ONDE o arquivo do processor mora (ver
  * jobs/README.md), nao necessariamente um NestModule proprio.
  *
- * `PaymentsModule` fornece o `PAYMENT_GATEWAY` (ver ADR-0012) e
- * `TicketsModule` fornece `TicketsService` (pro `TicketIssuanceProcessor`) —
- * nenhum dos dois importa `BookingsModule` de volta, entao nao ha ciclo.
+ * `PaymentsModule` fornece o `PAYMENT_GATEWAY` (ver ADR-0012), `TicketsModule` fornece
+ * `TicketsService` (pro `TicketIssuanceProcessor`) e `ActivitiesModule` fornece
+ * `ActivitiesService` (pra cancelar reservas de evento/restaurante junto do cancelamento da
+ * reserva — sem isto elas ficavam CONFIRMED presas pra sempre, consumindo capacidade do
+ * evento/horario indefinidamente mesmo com a viagem cancelada) — nenhum dos tres importa
+ * `BookingsModule` de volta, entao nao ha ciclo.
  */
 @Module({
   imports: [
@@ -36,6 +40,7 @@ import { BookingsRepository } from './persistence/bookings.repository';
     ),
     PaymentsModule,
     TicketsModule,
+    ActivitiesModule,
   ],
   controllers: [BookingsController],
   providers: [BookingsService, BookingsRepository, CabinHoldExpirationProcessor, TicketIssuanceProcessor],

@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { BookingStatus, CruiseStatus, Prisma, TicketStatus } from '@prisma/client';
+import { ActivityReservationStatus, BookingStatus, CruiseStatus, Prisma, TicketStatus } from '@prisma/client';
 import type {
   AdminCabinsQuery,
   AdminCruisesQuery,
@@ -104,6 +104,18 @@ export class AdminCatalogService {
         await tx.ticket.updateMany({
           where: { status: TicketStatus.ISSUED, bookingGuest: { booking: { cruiseId: id } } },
           data: { status: TicketStatus.CANCELLED },
+        });
+        // Mesmo motivo: reservas de evento/restaurante (ver ADR-0014) ficariam CONFIRMED presas
+        // pra sempre, continuando a contar contra a capacidade do evento/horario mesmo com o
+        // cruzeiro inteiro cancelado (bug encontrado e corrigido na revisao geral de 2026-09-05).
+        const affectedBookingIds = affectedBookings.map((b) => b.id);
+        await tx.eventReservation.updateMany({
+          where: { bookingId: { in: affectedBookingIds }, status: ActivityReservationStatus.CONFIRMED },
+          data: { status: ActivityReservationStatus.CANCELLED, cancelledAt: new Date() },
+        });
+        await tx.diningReservation.updateMany({
+          where: { bookingId: { in: affectedBookingIds }, status: ActivityReservationStatus.CONFIRMED },
+          data: { status: ActivityReservationStatus.CANCELLED, cancelledAt: new Date() },
         });
       }
 

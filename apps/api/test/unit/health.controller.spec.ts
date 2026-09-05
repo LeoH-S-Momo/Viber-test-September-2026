@@ -7,8 +7,8 @@ import { RedisHealthIndicator } from '../../src/health/indicators/redis.health-i
 describe('HealthController', () => {
   it('aggregates the database and redis checks', async () => {
     const healthCheckService = { check: jest.fn().mockResolvedValue({ status: 'ok' }) };
-    const databaseIndicator = { isHealthy: jest.fn() };
-    const redisIndicator = { isHealthy: jest.fn() };
+    const databaseIndicator = { isHealthy: jest.fn().mockResolvedValue({ database: { status: 'up' } }) };
+    const redisIndicator = { isHealthy: jest.fn().mockResolvedValue({ redis: { status: 'up' } }) };
 
     const moduleRef = await Test.createTestingModule({
       controllers: [HealthController],
@@ -23,9 +23,17 @@ describe('HealthController', () => {
     const result = await controller.check();
 
     expect(result).toEqual({ status: 'ok' });
-    expect(healthCheckService.check).toHaveBeenCalledWith([
-      expect.any(Function),
-      expect.any(Function),
-    ]);
+    expect(healthCheckService.check).toHaveBeenCalledWith([expect.any(Function), expect.any(Function)]);
+
+    // Sem isto, um refactor que checasse redis duas vezes (ou trocasse a ordem/o nome da chave)
+    // ainda passaria — `toHaveBeenCalledWith(expect.any(Function))` so prova que DUAS funcoes
+    // foram passadas, nunca que sao as funcoes certas, delegando pro indicator certo.
+    const indicators = healthCheckService.check.mock.calls[0]![0] as Array<() => unknown>;
+    expect(databaseIndicator.isHealthy).not.toHaveBeenCalled();
+    await indicators[0]!();
+    expect(databaseIndicator.isHealthy).toHaveBeenCalledWith('database');
+    expect(redisIndicator.isHealthy).not.toHaveBeenCalled();
+    await indicators[1]!();
+    expect(redisIndicator.isHealthy).toHaveBeenCalledWith('redis');
   });
 });

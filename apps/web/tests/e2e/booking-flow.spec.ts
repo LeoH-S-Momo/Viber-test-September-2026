@@ -48,51 +48,66 @@ async function registerAndLogin(page: Page, request: import('@playwright/test').
  * pouco usado uma cabine pode aparecer "disponivel" e na verdade ja ter
  * sido reservada por uma execucao anterior bem recente deste mesmo spec —
  * nesse caso fecha o erro e tenta a proxima cabine da lista.
+ *
+ * IMPORTANTE — cada tentativa faz um `page.goto` NOVO (reload completo), nunca reusa a mesma
+ * instancia de pagina entre tentativas: fechar o modal de uma tentativa fracassada dispara
+ * `router.refresh()` (ver cabin-booking-flow.tsx), que e um refresh CLIENT-SIDE (Router
+ * Cache/Data Cache do Next) — na pratica, chamado repetidas vezes em sequencia rapida dentro da
+ * MESMA instancia de pagina, ele nao garantiu dado fresco a tempo da proxima leitura: o rotulo
+ * de uma cabine recem-reservada continuava dizendo "disponível" por mais uma ou duas tentativas,
+ * fazendo o teste re-tentar a MESMA cabine ja presa (409 legitimo, rapido) varias vezes e, na
+ * pratica, nunca sair do lugar — visto e corrigido durante a propria depuracao desta suite na
+ * revisao geral de 2026-09-05. Um `page.goto` novo sempre busca a Server Component do zero.
  */
 async function selectFirstAvailableCabin(page: Page, cruiseSlug: string): Promise<boolean> {
-  await page.goto(`/cruzeiros/${cruiseSlug}`);
-  const mapHeading = page.getByRole('heading', { name: 'Mapa do navio' });
-  const hasShipMap = await mapHeading.isVisible().catch(() => false);
-  if (!hasShipMap) return false;
-  await mapHeading.scrollIntoViewIfNeeded();
-
-  const deckTabs = page.getByRole('tab');
-  const deckCount = await deckTabs.count();
   const guestsHeading = page.getByRole('heading', { name: 'Quem vai viajar?' });
   const holdErrorHeading = page.getByRole('heading', { name: 'Não foi possível reservar' });
+  const attemptedLabels = new Set<string>();
 
-  for (let deckIndex = 0; deckIndex < deckCount; deckIndex++) {
-    await deckTabs.nth(deckIndex).click();
-    // `$=` (termina com), nao `*=` (contem) — "indisponível" tambem contem "disponível" como
-    // substring, entao um match por "contains" pegaria cabines fora de operacao por engano.
-    const availableCabins = page.locator('svg[aria-label*="Planta"] g[role="button"][aria-label$=", disponível"]');
-    const count = await availableCabins.count();
-    for (let i = 0; i < count; i++) {
-      await availableCabins.nth(i).click();
+  // Teto de seguranca — nunca deveria chegar perto disto num ambiente saudavel, so evita um loop
+  // sem fim se algo ficar genuinamente preso (ex.: 409 pra toda cabine, sempre).
+  for (let attempt = 0; attempt < 30; attempt++) {
+    await page.goto(`/cruzeiros/${cruiseSlug}`);
+    const mapHeading = page.getByRole('heading', { name: 'Mapa do navio' });
+    const hasShipMap = await mapHeading.isVisible().catch(() => false);
+    if (!hasShipMap) return false;
+    await mapHeading.scrollIntoViewIfNeeded();
+
+    const deckTabs = page.getByRole('tab');
+    const deckCount = await deckTabs.count();
+    let clickedSomething = false;
+
+    for (let deckIndex = 0; deckIndex < deckCount && !clickedSomething; deckIndex++) {
+      await deckTabs.nth(deckIndex).click();
+      await page.locator('svg[aria-label*="Planta"] g[role="button"]').first().waitFor({ state: 'visible' });
+
+      // `$=` (termina com), nao `*=` (contem) — "indisponível" tambem contem "disponível" como
+      // substring, entao um match por "contains" pegaria cabines fora de operacao por engano.
+      const availableCabins = page.locator('svg[aria-label*="Planta"] g[role="button"][aria-label$=", disponível"]');
+      const labels = await availableCabins.evaluateAll((elements) => elements.map((el) => el.getAttribute('aria-label') ?? ''));
+      const candidateIndex = labels.findIndex((label) => !attemptedLabels.has(label));
+      if (candidateIndex === -1) continue; // nenhuma cabine "disponivel" nao tentada neste deck — proximo deck
+
+      attemptedLabels.add(labels[candidateIndex]!);
+      await availableCabins.nth(candidateIndex).click();
+
       const selectButton = page.getByRole('button', { name: 'Selecionar cabine' });
       if (!(await selectButton.isEnabled().catch(() => false))) continue;
 
       await selectButton.click();
+      clickedSomething = true;
       const outcome = await Promise.race([
-        guestsHeading.waitFor({ state: 'visible', timeout: 8_000 }).then(() => 'guests' as const),
-        holdErrorHeading.waitFor({ state: 'visible', timeout: 8_000 }).then(() => 'error' as const),
+        guestsHeading.waitFor({ state: 'visible', timeout: 15_000 }).then(() => 'guests' as const),
+        holdErrorHeading.waitFor({ state: 'visible', timeout: 15_000 }).then(() => 'error' as const),
       ]).catch(() => 'timeout' as const);
 
       if (outcome === 'guests') return true;
-
-      // 'error' ou 'timeout' — fecha o modal (se ainda aberto) e espera o backdrop sumir antes
-      // de tentar a proxima cabine: sem isto, o backdrop (`fixed inset-0`) fica bloqueando
-      // cliques no mapa por baixo. `exact: true` — sem isto, "Fechar" tambem casaria com
-      // "Fechar detalhes" (o botao do painel do mapa, atras do modal e fora da area clicavel).
-      const closeButton = page.getByRole('button', { name: 'Fechar', exact: true }).first();
-      if (await closeButton.isVisible().catch(() => false)) {
-        await closeButton.click();
-      }
-      await page
-        .locator('div.fixed.inset-0.z-50')
-        .waitFor({ state: 'detached', timeout: 5_000 })
-        .catch(() => {});
+      // 'error' ou 'timeout' — sai do loop de decks; o proximo `attempt` do loop externo faz um
+      // `page.goto` novo (dado fresco garantido) em vez de tentar mais alguma coisa nesta mesma
+      // instancia de pagina.
     }
+
+    if (!clickedSomething) return false; // nenhuma cabine "disponivel" nao tentada em NENHUM deck — de verdade esgotado
   }
   return false;
 }
@@ -128,6 +143,8 @@ test.describe('booking flow', () => {
   });
 
   test('an invalid coupon during the booking flow shows an inline error, not a crash', async ({ page, request }) => {
+    test.slow(); // mesma razao do outro teste — selectFirstAvailableCabin pode tentar varias cabines.
+
     await registerAndLogin(page, request, 'passageiro-e2e-cupom');
 
     const selected = await selectFirstAvailableCabin(page, 'the-amazing-gemini-and-the-copilots');

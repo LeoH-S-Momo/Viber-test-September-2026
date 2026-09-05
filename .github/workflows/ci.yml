@@ -70,10 +70,6 @@ jobs:
       POSTGRES_DB: seapass
       POSTGRES_PORT: "5432"
       REDIS_PORT: "6379"
-      MINIO_ROOT_USER: seapass
-      MINIO_ROOT_PASSWORD: seapass123
-      MINIO_PORT: "9000"
-      MINIO_CONSOLE_PORT: "9001"
       MAILHOG_SMTP_PORT: "1025"
       MAILHOG_UI_PORT: "8025"
       DATABASE_URL: postgresql://seapass:seapass@localhost:5432/seapass?schema=public
@@ -95,7 +91,7 @@ jobs:
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
-      - name: Start infra (postgres, redis, minio, mailhog)
+      - name: Start infra (postgres, redis, mailhog)
         run: docker compose -f infra/docker-compose.yml up -d --wait
       - run: pnpm db:migrate
       - run: pnpm db:seed
@@ -122,13 +118,35 @@ jobs:
         if: always()
         run: docker compose -f infra/docker-compose.yml down -v
 
+  # Roda em toda PR (nao so em push pra main) — uma imagem que builda mas nao sobe (CMD errado,
+  # arquivo de runtime faltando) so seria descoberta depois de mergear, sem isto.
   docker-build:
     runs-on: ubuntu-latest
     needs: lint-typecheck-unit
-    if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
       - name: Build api image
         run: docker build -f infra/docker/api.Dockerfile -t seapass-api:${{ github.sha }} .
       - name: Build web image
         run: docker build -f infra/docker/web.Dockerfile -t seapass-web:${{ github.sha }} .
+      # Smoke test — so confirma que o container SOBE e responde HTTP (nao builda e crasha no
+      # boot). Nao espera 200 (a api sem Postgres/Redis reais reporta 503 em /health de proposito,
+      # ver AllExceptionsFilter/HealthController) — so que o processo nao morreu, o que
+      # integration-tests/e2e-tests ja cobrem com a infra de verdade.
+      - name: Smoke test api image (container boots and serves HTTP)
+        run: |
+          docker run -d --name seapass-api-smoke -p 3333:3333 \
+            -e DATABASE_URL=postgresql://x:x@localhost:5432/x \
+            -e REDIS_URL=redis://localhost:6379 \
+            -e JWT_ACCESS_SECRET=smoke-test-access-secret-32-chars-min \
+            -e JWT_REFRESH_SECRET=smoke-test-refresh-secret-32-chars-min \
+            seapass-api:${{ github.sha }}
+          for i in $(seq 1 15); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3333/health || echo "000")
+            if [ "$code" != "000" ]; then echo "api respondeu HTTP $code"; exit 0; fi
+            sleep 1
+          done
+          echo "api nunca respondeu — dumping logs:"; docker logs seapass-api-smoke; exit 1
+      - name: Stop api smoke container
+        if: always()
+        run: docker rm -f seapass-api-smoke
