@@ -425,7 +425,9 @@ Roteiro completo e priorizado em [`docs/product/BACKLOG.md`](docs/product/BACKLO
 ## Decisões técnicas que eu explicaria em uma entrevista
 
 Estas são as escolhas que eu destacaria numa entrevista técnica — cada uma tem um trade-off real
-por trás, não é só "a forma de fazer".
+por trás, não é só "a forma de fazer". Complementado por
+[`docs/INTERVIEW_QA.md`](docs/INTERVIEW_QA.md) — 50 perguntas diretas que um avaliador poderia
+fazer, com resposta e referência ao arquivo/ADR correspondente.
 
 **1. 404, não 403, para recurso de outro organizador.**
 A tentação óbvia é usar 403 ("proibido"). Mas 403 confirma que o recurso *existe* — só que não é
