@@ -44,5 +44,8 @@ import { BookingsRepository } from './persistence/bookings.repository';
   ],
   controllers: [BookingsController],
   providers: [BookingsService, BookingsRepository, CabinHoldExpirationProcessor, TicketIssuanceProcessor],
+  // Exportado para WebhooksModule injetar (confirmPaymentByTransactionId — ver ADR do webhook de
+  // pagamento). WebhooksModule nao e importado de volta aqui, entao nao ha ciclo.
+  exports: [BookingsService],
 })
 export class BookingsModule {}

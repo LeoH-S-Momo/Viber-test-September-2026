@@ -192,7 +192,7 @@ export interface AdminBookingDetail extends Omit<AdminBookingListItem, 'cruise' 
   coupon: { code: string } | null;
 }
 
-export type AdminPaymentStatus = 'PENDING' | 'APPROVED' | 'DECLINED' | 'REFUNDED';
+export type AdminPaymentStatus = 'PENDING' | 'APPROVED' | 'DECLINED' | 'PARTIALLY_REFUNDED' | 'REFUNDED';
 export type AdminPaymentMethod = 'CREDIT_CARD' | 'PIX' | 'BOLETO';
 
 export interface AdminPaymentListItem {

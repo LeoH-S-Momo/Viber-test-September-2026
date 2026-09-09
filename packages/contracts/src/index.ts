@@ -19,3 +19,8 @@ export * from './catalog/itinerary-stop.schema';
 export * from './booking/booking.schema';
 export * from './activity/activity.schema';
 export * from './admin/admin.schema';
+export * from './payment/refund.schema';
+export * from './payment/installment.schema';
+export * from './payment/webhook.schema';
+export * from './review/review.schema';
+export * from './feature-flag/feature-flag.schema';

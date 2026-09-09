@@ -61,6 +61,7 @@ export interface OrganizerBooking {
   cabin: { code: string; cabinCategory: { name: string } };
   user: { fullName: string; email: string };
   guests: Array<{ id: string; fullName: string; isPrimary: boolean }>;
+  payments: Array<{ id: string; status: 'PENDING' | 'APPROVED' | 'DECLINED' | 'PARTIALLY_REFUNDED' | 'REFUNDED'; amount: string }>;
 }
 
 export interface OrganizerPassenger {

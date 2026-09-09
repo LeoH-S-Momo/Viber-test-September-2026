@@ -25,6 +25,9 @@ export const DomainEvent = {
   EVENT_BOOKED: 'event.booked',
   /** Nao estava na lista de exemplos do pedido, mas e o que torna "alteracao de evento" (uma das notificacoes pedidas) possivel — ver ADR-0019. */
   EVENT_UPDATED: 'event.updated',
+  PAYMENT_REFUNDED: 'payment.refunded',
+  REVIEW_SUBMITTED: 'review.submitted',
+  REVIEW_MODERATED: 'review.moderated',
 } as const;
 
 export type DomainEventName = (typeof DomainEvent)[keyof typeof DomainEvent];
@@ -79,4 +82,22 @@ export interface EventUpdatedPayload {
   eventId: string;
   /** Nomes dos campos que mudaram — o listener so notifica quando algo que importa pro passageiro mudou (ver EventsService.update). */
   changedFields: string[];
+}
+
+export interface PaymentRefundedPayload {
+  refundId: string;
+  paymentId: string;
+  bookingId: string;
+  amount: string;
+}
+
+export interface ReviewSubmittedPayload {
+  reviewId: string;
+  cruiseId: string;
+}
+
+export interface ReviewModeratedPayload {
+  reviewId: string;
+  bookingId: string;
+  status: 'APPROVED' | 'REJECTED' | 'HIDDEN';
 }

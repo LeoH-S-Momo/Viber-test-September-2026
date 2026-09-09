@@ -46,5 +46,7 @@ export const PaymentMethodSchema = z.enum(["CREDIT_CARD", "PIX", "BOLETO"]);
 
 export const CheckoutBookingSchema = z.object({
   paymentMethod: PaymentMethodSchema,
+  /// So relevante para paymentMethod=CREDIT_CARD — ignorado (tratado como 1) para PIX/BOLETO.
+  installments: z.number().int().min(1).max(12).default(1),
 });
 export type CheckoutBookingInput = z.infer<typeof CheckoutBookingSchema>;

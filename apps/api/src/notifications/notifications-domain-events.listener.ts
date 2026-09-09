@@ -7,6 +7,9 @@ import {
   type EventUpdatedPayload,
   type PaymentApprovedPayload,
   type PaymentFailedPayload,
+  type PaymentRefundedPayload,
+  type ReviewModeratedPayload,
+  type ReviewSubmittedPayload,
   type TicketGeneratedPayload,
 } from '../domain-events/domain-events';
 import { NotificationsService } from './notifications.service';
@@ -76,6 +79,21 @@ export class NotificationsDomainEventsListener {
   @OnEvent(DomainEvent.EVENT_UPDATED)
   async onEventUpdated(payload: EventUpdatedPayload): Promise<void> {
     await this.safely('EVENT_UPDATED', payload, () => this.notifications.notifyEventUpdated(payload.eventId));
+  }
+
+  @OnEvent(DomainEvent.PAYMENT_REFUNDED)
+  async onPaymentRefunded(payload: PaymentRefundedPayload): Promise<void> {
+    await this.safely('PAYMENT_REFUNDED', payload, () => this.notifications.notifyPaymentRefunded(payload.refundId));
+  }
+
+  @OnEvent(DomainEvent.REVIEW_SUBMITTED)
+  async onReviewSubmitted(payload: ReviewSubmittedPayload): Promise<void> {
+    await this.safely('REVIEW_SUBMITTED', payload, () => this.notifications.notifyReviewSubmitted(payload.reviewId));
+  }
+
+  @OnEvent(DomainEvent.REVIEW_MODERATED)
+  async onReviewModerated(payload: ReviewModeratedPayload): Promise<void> {
+    await this.safely('REVIEW_MODERATED', payload, () => this.notifications.notifyReviewModerated(payload.reviewId));
   }
 
   // BOOKING_CREATED e CHECKIN_COMPLETED nao tem listener aqui de proposito —

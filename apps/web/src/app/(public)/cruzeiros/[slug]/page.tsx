@@ -10,9 +10,11 @@ import { CruiseHero } from '@/features/cruise-detail/cruise-hero';
 import { CruiseItinerary } from '@/features/cruise-detail/cruise-itinerary';
 import { CruiseOverview } from '@/features/cruise-detail/cruise-overview';
 import { CruiseRestaurants } from '@/features/cruise-detail/cruise-restaurants';
+import { CruiseReviews } from '@/features/cruise-detail/cruise-reviews';
 import { CruiseVenues } from '@/features/cruise-detail/cruise-venues';
 import { getCruiseBySlug } from '@/services/cruises.service';
 import { getCruiseDeckMap } from '@/services/ship-map.service';
+import { getCruiseReviews } from '@/services/reviews.service';
 
 type Params = Promise<{ slug: string }>;
 
@@ -33,7 +35,11 @@ export default async function CruiseDetailPage({ params }: { params: Params }) {
   // Disparadas juntas — o mapa do navio e um endpoint proprio (GET
   // /cruises/:slug/deck-map), buscado em paralelo pra nao virar um segundo
   // round-trip serial depois do detalhe do cruzeiro.
-  const [result, deckMapResult] = await Promise.all([getCruiseBySlug(slug), getCruiseDeckMap(slug)]);
+  const [result, deckMapResult, reviewsResult] = await Promise.all([
+    getCruiseBySlug(slug),
+    getCruiseDeckMap(slug),
+    getCruiseReviews(slug),
+  ]);
 
   if (!result.ok) {
     return (
@@ -68,6 +74,7 @@ export default async function CruiseDetailPage({ params }: { params: Params }) {
         <CruiseExperiences experiences={cruise.experiences} />
         <CruiseRestaurants restaurants={cruise.ship.restaurants} />
         <CruiseCabins pricings={cruise.cabinPricings} />
+        {reviewsResult.ok && <CruiseReviews result={reviewsResult.data} />}
       </Container>
     </div>
   );

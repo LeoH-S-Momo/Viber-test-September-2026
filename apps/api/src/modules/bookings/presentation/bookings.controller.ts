@@ -96,7 +96,7 @@ export class BookingsController {
     @Body(new ZodValidationPipe(CheckoutBookingSchema)) body: CheckoutBookingInput,
     @Headers('idempotency-key') idempotencyKey?: string,
   ) {
-    return this.bookingsService.checkout(id, user.sub, body.paymentMethod, idempotencyKey || undefined);
+    return this.bookingsService.checkout(id, user.sub, body.paymentMethod, idempotencyKey || undefined, body.installments);
   }
 
   /** Callback (simulado) de gateway de pagamento — confirma a reserva. */

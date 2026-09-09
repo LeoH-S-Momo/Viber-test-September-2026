@@ -7,6 +7,8 @@ import {
   type ChargeResult,
   type GatewayOutcome,
   type PaymentGateway,
+  type RefundRequest,
+  type RefundResult,
 } from '../domain/payment-gateway';
 
 /**
@@ -89,6 +91,18 @@ export class FakePaymentGateway implements PaymentGateway {
     this.resultsByTransactionId.set(gatewayTransactionId, resolved);
     this.resultsByIdempotencyKey.set(this.findIdempotencyKeyFor(gatewayTransactionId), resolved);
     return resolved;
+  }
+
+  /**
+   * Mesma convencao de sufixo magico do `charge` — `reason` terminando em `::fail` simula uma
+   * falha do lado do gateway (raro na vida real, mas precisa existir pra testar o caminho de
+   * erro); qualquer outro motivo sempre resolve em `COMPLETED` (mockado, ver ADR do reembolso).
+   */
+  async refund(request: RefundRequest): Promise<RefundResult> {
+    if (request.reason.endsWith('::fail')) {
+      return { outcome: 'FAILED', gatewayRefundId: `FAKE-REFUND-${randomUUID()}`, failureReason: 'Simulacao: reembolso recusado pelo FakePaymentGateway.' };
+    }
+    return { outcome: 'COMPLETED', gatewayRefundId: `FAKE-REFUND-${randomUUID()}` };
   }
 
   private findIdempotencyKeyFor(gatewayTransactionId: string): string {

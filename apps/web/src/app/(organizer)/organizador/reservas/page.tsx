@@ -8,12 +8,16 @@ import { ErrorState } from '@/components/ui/error-state';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button-styles';
+import { Modal } from '@/components/ui/modal';
 import { RequireRole } from '@/components/require-role';
 import { useAuth } from '@/lib/auth-context';
 import { formatDate, formatPrice } from '@/lib/format';
+import { RefundPanel } from '@/features/payments/refund-panel';
 import { getBookings, getMyCruises } from '@/services/organizers.service';
 import type { CruiseSummary } from '@/types/cruise';
 import type { OrganizerBooking, OrganizerBookingStatus } from '@/types/organizer';
+
+const REFUNDABLE_STATUSES = new Set(['APPROVED', 'PARTIALLY_REFUNDED', 'REFUNDED']);
 
 const inputClassName =
   'rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500';
@@ -49,6 +53,7 @@ function BookingsContent() {
   const [bookingStatus, setBookingStatus] = useState('');
   const [page, setPage] = useState(1);
   const [state, setState] = useState<LoadState>({ status: 'loading' });
+  const [refundBooking, setRefundBooking] = useState<OrganizerBooking | null>(null);
 
   useEffect(() => {
     if (!accessToken) return;
@@ -130,27 +135,42 @@ function BookingsContent() {
                     <th className="px-4 py-3">Status</th>
                     <th className="px-4 py-3">Total</th>
                     <th className="px-4 py-3">Criada em</th>
+                    <th className="px-4 py-3" />
                   </tr>
                 </thead>
                 <tbody>
-                  {state.result.data.data.map((booking: OrganizerBooking) => (
-                    <tr key={booking.id} className="border-b border-slate-100 last:border-0">
-                      <td className="px-4 py-3">
-                        <p className="font-medium text-slate-900">{booking.user.fullName}</p>
-                        <p className="text-xs text-slate-500">{booking.user.email}</p>
-                      </td>
-                      <td className="px-4 py-3">{booking.cruise.title}</td>
-                      <td className="px-4 py-3">
-                        {booking.cabin.code} <span className="text-xs text-slate-500">({booking.cabin.cabinCategory.name})</span>
-                      </td>
-                      <td className="px-4 py-3">{booking.guests.length}</td>
-                      <td className="px-4 py-3">
-                        <Badge tone={STATUS_TONE[booking.status]}>{STATUS_LABEL[booking.status]}</Badge>
-                      </td>
-                      <td className="px-4 py-3 font-medium text-slate-900">{formatPrice(booking.totalAmount)}</td>
-                      <td className="px-4 py-3 text-slate-500">{formatDate(booking.createdAt)}</td>
-                    </tr>
-                  ))}
+                  {state.result.data.data.map((booking: OrganizerBooking) => {
+                    const latestPayment = booking.payments[0];
+                    return (
+                      <tr key={booking.id} className="border-b border-slate-100 last:border-0">
+                        <td className="px-4 py-3">
+                          <p className="font-medium text-slate-900">{booking.user.fullName}</p>
+                          <p className="text-xs text-slate-500">{booking.user.email}</p>
+                        </td>
+                        <td className="px-4 py-3">{booking.cruise.title}</td>
+                        <td className="px-4 py-3">
+                          {booking.cabin.code} <span className="text-xs text-slate-500">({booking.cabin.cabinCategory.name})</span>
+                        </td>
+                        <td className="px-4 py-3">{booking.guests.length}</td>
+                        <td className="px-4 py-3">
+                          <Badge tone={STATUS_TONE[booking.status]}>{STATUS_LABEL[booking.status]}</Badge>
+                        </td>
+                        <td className="px-4 py-3 font-medium text-slate-900">{formatPrice(booking.totalAmount)}</td>
+                        <td className="px-4 py-3 text-slate-500">{formatDate(booking.createdAt)}</td>
+                        <td className="px-4 py-3 text-right">
+                          {latestPayment && REFUNDABLE_STATUSES.has(latestPayment.status) && (
+                            <button
+                              type="button"
+                              onClick={() => setRefundBooking(booking)}
+                              className={buttonVariants({ variant: 'ghost', size: 'sm' })}
+                            >
+                              Reembolso
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -180,6 +200,12 @@ function BookingsContent() {
             </div>
           )}
         </>
+      )}
+
+      {refundBooking && refundBooking.payments[0] && (
+        <Modal title={`Reembolso — ${refundBooking.user.fullName}`} onClose={() => setRefundBooking(null)}>
+          <RefundPanel paymentId={refundBooking.payments[0].id} paidAmount={refundBooking.payments[0].amount} canIssue />
+        </Modal>
       )}
     </>
   );

@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { ConfigService } from '@nestjs/config';
-import type { NotificationType } from '@prisma/client';
+import { Prisma, RoleKey, type NotificationType } from '@prisma/client';
 import type { Queue } from 'bullmq';
 import { PrismaService } from '../database/prisma/prisma.service';
 import {
@@ -18,6 +18,9 @@ import {
   eventChangedContent,
   paymentApprovedContent,
   paymentDeclinedContent,
+  paymentRefundedContent,
+  reviewModeratedContent,
+  reviewSubmittedContent,
   ticketAvailableContent,
   type NotificationContent,
 } from './notification-templates';
@@ -154,6 +157,91 @@ export class NotificationsService {
 
     const content = bookingCancelledContent({ fullName: booking.user.fullName, cruiseTitle: booking.cruise.title, reason, cancelledBy });
     await this.createAndEnqueue({ userId: booking.userId, bookingId, type: 'BOOKING_CANCELLED', content });
+  }
+
+  async notifyPaymentRefunded(refundId: string): Promise<void> {
+    const refund = await this.prisma.refund.findUnique({
+      where: { id: refundId },
+      select: {
+        amount: true,
+        payment: {
+          select: {
+            amount: true,
+            refunds: { where: { status: 'COMPLETED' }, select: { amount: true } },
+            booking: { select: { id: true, userId: true, user: { select: { fullName: true } }, cruise: { select: { title: true } } } },
+          },
+        },
+      },
+    });
+    if (!refund) return;
+
+    const totalRefunded = refund.payment.refunds.reduce((sum, r) => sum.plus(r.amount), new Prisma.Decimal(0));
+    const fullyRefunded = totalRefunded.gte(refund.payment.amount);
+    const content = paymentRefundedContent({
+      fullName: refund.payment.booking.user.fullName,
+      cruiseTitle: refund.payment.booking.cruise.title,
+      amount: refund.amount.toString(),
+      fullyRefunded,
+    });
+    await this.createAndEnqueue({
+      userId: refund.payment.booking.userId,
+      bookingId: refund.payment.booking.id,
+      type: 'PAYMENT_REFUNDED',
+      content,
+    });
+  }
+
+  /** Notifica um ORGANIZER_ADMIN do organizador dono do cruzeiro — a primeira conta encontrada (nao ha "responsavel" designado hoje). */
+  async notifyReviewSubmitted(reviewId: string): Promise<void> {
+    const review = await this.prisma.review.findUnique({
+      where: { id: reviewId },
+      select: {
+        rating: true,
+        cruise: {
+          select: {
+            title: true,
+            organizer: {
+              select: {
+                userRoles: {
+                  where: { role: { key: RoleKey.ORGANIZER_ADMIN } },
+                  take: 1,
+                  select: { user: { select: { id: true, fullName: true } } },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    const admin = review?.cruise.organizer.userRoles[0]?.user;
+    if (!review || !admin) return;
+
+    const content = reviewSubmittedContent({
+      organizerContactName: admin.fullName,
+      cruiseTitle: review.cruise.title,
+      rating: review.rating,
+    });
+    await this.createAndEnqueue({ userId: admin.id, type: 'REVIEW_SUBMITTED', content });
+  }
+
+  async notifyReviewModerated(reviewId: string): Promise<void> {
+    const review = await this.prisma.review.findUnique({
+      where: { id: reviewId },
+      select: {
+        status: true,
+        bookingId: true,
+        booking: { select: { userId: true, user: { select: { fullName: true } } } },
+        cruise: { select: { title: true } },
+      },
+    });
+    if (!review || review.status === 'PENDING') return;
+
+    const content = reviewModeratedContent({
+      fullName: review.booking.user.fullName,
+      cruiseTitle: review.cruise.title,
+      status: review.status,
+    });
+    await this.createAndEnqueue({ userId: review.booking.userId, bookingId: review.bookingId, type: 'REVIEW_MODERATED', content });
   }
 
   /** Um evento pode ter varios passageiros que o reservaram — uma notificacao por reserva CONFIRMED (ver ActivitiesService.reserveEvent). */

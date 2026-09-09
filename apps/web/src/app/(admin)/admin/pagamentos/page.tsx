@@ -13,6 +13,7 @@ import { AdminPagination } from '@/features/admin/admin-pagination';
 import { filterInputClassName } from '@/features/admin/admin-ui';
 import { useAdminDetail } from '@/features/admin/use-admin-detail';
 import { useAdminList } from '@/features/admin/use-admin-list';
+import { RefundPanel } from '@/features/payments/refund-panel';
 import { formatDateTime, formatPrice } from '@/lib/format';
 import { getPayment, listPayments } from '@/services/admin.service';
 import type { AdminPaymentListItem, AdminPaymentStatus } from '@/types/admin';
@@ -21,6 +22,7 @@ const STATUS_TONE: Record<AdminPaymentStatus, 'success' | 'neutral' | 'accent'> 
   APPROVED: 'success',
   PENDING: 'accent',
   DECLINED: 'neutral',
+  PARTIALLY_REFUNDED: 'accent',
   REFUNDED: 'neutral',
 };
 
@@ -28,6 +30,7 @@ const STATUS_LABEL: Record<AdminPaymentStatus, string> = {
   APPROVED: 'Aprovado',
   PENDING: 'Pendente',
   DECLINED: 'Recusado',
+  PARTIALLY_REFUNDED: 'Parcialmente reembolsado',
   REFUNDED: 'Reembolsado',
 };
 
@@ -56,6 +59,9 @@ function PaymentDetailModal({ paymentId, onClose }: { paymentId: string; onClose
           {detail.paidAt && <p className="text-xs text-slate-500">Pago em {formatDateTime(detail.paidAt)}</p>}
           {detail.failureReason && <p className="rounded-lg bg-slate-50 px-3 py-2 text-slate-600">Motivo da recusa: {detail.failureReason}</p>}
           <p className="text-xs text-slate-400">ID da transação simulada: {detail.simulatedTransactionId}</p>
+          {(detail.status === 'APPROVED' || detail.status === 'PARTIALLY_REFUNDED' || detail.status === 'REFUNDED') && (
+            <RefundPanel paymentId={detail.id} paidAmount={detail.amount} canIssue />
+          )}
         </div>
       )}
     </Modal>

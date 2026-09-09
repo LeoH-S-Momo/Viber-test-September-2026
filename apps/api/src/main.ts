@@ -30,7 +30,10 @@ function registerProcessSafetyNets(): void {
 async function bootstrap(): Promise<void> {
   registerProcessSafetyNets();
 
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  // `rawBody: true` expoe `req.rawBody` — o webhook de pagamento (ver WebhooksModule) precisa do
+  // corpo EXATO (bytes crus) pra verificar a assinatura HMAC; o corpo ja parseado como JSON pelo
+  // Nest nao reproduz byte a byte o que foi assinado do lado do "gateway" (mockado).
+  const app = await NestFactory.create(AppModule, { bufferLogs: true, rawBody: true });
   app.useLogger(app.get(Logger));
   app.use(helmet());
   app.use(cookieParser());

@@ -102,7 +102,27 @@ enum PaymentStatus {
   PENDING
   APPROVED
   DECLINED
+  PARTIALLY_REFUNDED
   REFUNDED
+}
+
+enum RefundStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+enum ReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  HIDDEN
+}
+
+enum FeatureFlagKey {
+  ADVANCED_ANALYTICS
+  EARLY_CHECKIN_WINDOW
+  CUSTOM_BRANDING
 }
 
 enum TicketStatus {
@@ -130,6 +150,9 @@ enum NotificationType {
   ITINERARY_CHANGED
   CHECKIN_REMINDER
   BOOKING_CANCELLED
+  PAYMENT_REFUNDED
+  REVIEW_SUBMITTED
+  REVIEW_MODERATED
   GENERIC
 }
 
@@ -273,6 +296,7 @@ model Organizer {
   ships     Ship[]
   cruises   Cruise[]
   coupons   Coupon[]
+  featureFlags OrganizerFeatureFlag[]
 
   @@index([status])
   @@map("organizers")
@@ -422,6 +446,7 @@ model Cruise {
   experiences    Experience[]
   bookings       Booking[]
   couponScopes   CouponCruise[]
+  reviews        Review[]
 
   @@index([organizerId])
   @@index([shipId])
@@ -661,6 +686,7 @@ model Booking {
   diningReservations DiningReservation[]
   payments           Payment[]
   notifications      Notification[]
+  review             Review?
 
   @@unique([userId, idempotencyKey])
   @@index([cruiseId])
@@ -783,15 +809,96 @@ model Payment {
   /// Motivo da recusa devolvido pelo gateway (equivalente ao decline_code/failure_message de um
   /// gateway real) — null enquanto PENDING/APPROVED, preenchido quando DECLINED.
   failureReason           String?
+  /// Numero de parcelas do cartao (1 = a vista) — so relevante para method=CREDIT_CARD. Quando
+  /// > 1, `amount` acima ja e o total COM juros (ver InstallmentPricing), nao o preco original
+  /// da reserva.
+  installments            Int           @default(1)
   paidAt                 DateTime?
   createdAt              DateTime      @default(now())
   updatedAt              DateTime      @updatedAt
 
-  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  booking Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  refunds Refund[]
 
   @@index([bookingId])
   @@index([status])
   @@map("payments")
+}
+
+/// Reembolso (parcial ou total) de um Payment — mockado (ver
+/// FakePaymentGateway.refund), mas rastreavel como um reembolso real: pode
+/// haver varios por Payment ate a soma atingir o valor pago (Payment vira
+/// PARTIALLY_REFUNDED ate la, REFUNDED quando esgota).
+model Refund {
+  id              String       @id @default(cuid())
+  paymentId       String
+  amount          Decimal      @db.Decimal(10, 2)
+  reason          String
+  status          RefundStatus @default(PENDING)
+  gatewayRefundId String?      @unique
+  failureReason   String?
+  actorUserId     String
+  createdAt       DateTime     @default(now())
+  processedAt     DateTime?
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  @@index([paymentId])
+  @@map("refunds")
+}
+
+/// Avaliacao de uma reserva ja encerrada (Cruise.disembarkationDate no passado) — uma por
+/// Booking, moderada pelo organizador do cruzeiro antes de aparecer publicamente.
+model Review {
+  id                String       @id @default(cuid())
+  bookingId         String       @unique
+  userId            String
+  cruiseId          String
+  rating            Int
+  comment           String?
+  status            ReviewStatus @default(PENDING)
+  moderatedAt       DateTime?
+  moderatedByUserId String?
+  moderationNote    String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  cruise  Cruise  @relation(fields: [cruiseId], references: [id], onDelete: Cascade)
+
+  @@index([cruiseId, status])
+  @@map("reviews")
+}
+
+/// Evento recebido de um webhook de pagamento (mockado — ver ADR do
+/// webhook). `eventId` (do "gateway") garante idempotencia: reenviar o
+/// mesmo evento nunca reprocessa.
+model WebhookEvent {
+  id              String    @id @default(cuid())
+  provider        String
+  eventId         String    @unique
+  payload         Json
+  receivedAt      DateTime  @default(now())
+  processedAt     DateTime?
+  processingError String?
+
+  @@map("webhook_events")
+}
+
+/// Flag de feature (catalogo fixo em code, ver feature-flag-catalog.ts) liberada por
+/// organizador — "beta controlado": so PLATFORM_ADMIN altera, organizador so le o proprio estado.
+model OrganizerFeatureFlag {
+  id              String         @id @default(cuid())
+  organizerId     String
+  key             FeatureFlagKey
+  enabled         Boolean        @default(false)
+  updatedAt       DateTime       @updatedAt
+  updatedByUserId String
+
+  organizer Organizer @relation(fields: [organizerId], references: [id], onDelete: Cascade)
+
+  @@unique([organizerId, key])
+  @@map("organizer_feature_flags")
 }
 
 /// Ingresso digital — um por hospede (nao por reserva), como um cartao de

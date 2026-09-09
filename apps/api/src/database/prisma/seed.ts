@@ -483,10 +483,10 @@ const HEAVY_METAL_DESCRIPTION = [
 /**
  * Cruzeiro principal de demonstração — o único com itinerário/eventos/experiências
  * completos e dados de reserva/hold/cabine (ver seedCabinAvailabilityDemoData).
- * `where` casa pelo slug ANTIGO de propósito: garante que rodar o seed de novo
- * num banco que já tinha "Rock in Sea — Clássicos do Rock" RENOMEIA a linha
- * existente (preservando reservas/tickets já criados) em vez de criar uma
- * segunda linha duplicada com o slug novo.
+ * `where` casa pelo slug ATUAL ("heavy-metal-do-leo-sensations") — o banco já passou
+ * pela migração do slug antigo ("rock-in-sea-classicos-do-rock") uma vez; casar pelo
+ * antigo pra sempre quebraria a idempotência do seed a partir da segunda execução
+ * (upsert tentaria CRIAR uma linha com o slug novo, que já existe -> unique constraint).
  */
 async function seedHeavyMetalCruise(
   organizerId: string,
@@ -499,10 +499,9 @@ async function seedHeavyMetalCruise(
   const disembarkationDate = new Date('2026-11-15T09:00:00Z');
 
   const cruise = await prisma.cruise.upsert({
-    where: { slug: 'rock-in-sea-classicos-do-rock' },
+    where: { slug: 'heavy-metal-do-leo-sensations' },
     update: {
       title: 'Heavy Metal do Leo Sensations',
-      slug: 'heavy-metal-do-leo-sensations',
       theme: 'Heavy Metal',
       description: HEAVY_METAL_DESCRIPTION,
     },
@@ -1037,6 +1036,197 @@ async function seedCabinAvailabilityDemoData(
   await prisma.cabin.update({ where: { id: suiteCabin.id }, data: { status: 'MAINTENANCE' } });
 }
 
+/**
+ * 10 avaliações de demonstração, já APPROVED (visíveis na página pública do
+ * cruzeiro sem precisar moderar nada manualmente — pedido explícito do
+ * usuário). `ReviewEligibilityPolicy` só permite avaliar reserva CONFIRMED
+ * de um cruzeiro cujo `disembarkationDate` já passou — nenhum dos cruzeiros
+ * de demonstração existentes serve (todos com datas em 2026-11+/2027), então
+ * este cruzeiro "já navegou" (julho de 2026) existe só pra isso: mesmo
+ * navio/organizador, sem itinerário/eventos próprios (não é o foco), com 10
+ * reservas CONFIRMED (1 por avaliador) cobrindo cabines interna e externa.
+ */
+async function seedPastVoyageWithReviews(
+  organizerId: string,
+  shipId: string,
+  ports: Awaited<ReturnType<typeof seedPorts>>,
+  categories: Record<string, string>,
+  passwordHash: string,
+  moderatedByUserId: string,
+) {
+  const embarkationDate = new Date('2026-07-20T16:00:00Z');
+  const disembarkationDate = new Date('2026-07-25T09:00:00Z');
+
+  const cruise = await prisma.cruise.upsert({
+    where: { slug: 'rock-in-sea-classicos-do-rock-julho' },
+    update: {},
+    create: {
+      organizerId,
+      shipId,
+      title: 'Rock in Sea — Clássicos do Rock (Edição de Julho)',
+      slug: 'rock-in-sea-classicos-do-rock-julho',
+      theme: 'Rock Clássico',
+      description:
+        'Edição de julho do Clássicos do Rock — já navegada, mantida no catálogo com as avaliações reais dos passageiros que embarcaram.',
+      status: 'PUBLISHED',
+      embarkationDate,
+      disembarkationDate,
+      embarkationPortId: ports.santos.id,
+      disembarkationPortId: ports.santos.id,
+    },
+  });
+
+  const itineraryDays: Array<{ dayNumber: number; portId: string | null; isEmbarkation?: boolean; isDisembarkation?: boolean }> = [
+    { dayNumber: 1, portId: ports.santos.id, isEmbarkation: true },
+    { dayNumber: 2, portId: ports.ilhaGrande.id },
+    { dayNumber: 3, portId: ports.buzios.id },
+    { dayNumber: 4, portId: null },
+    { dayNumber: 5, portId: ports.santos.id, isDisembarkation: true },
+  ];
+  for (const day of itineraryDays) {
+    await prisma.itineraryStop.upsert({
+      where: { cruiseId_dayNumber: { cruiseId: cruise.id, dayNumber: day.dayNumber } },
+      update: {},
+      create: {
+        cruiseId: cruise.id,
+        portId: day.portId,
+        dayNumber: day.dayNumber,
+        isEmbarkation: day.isEmbarkation ?? false,
+        isDisembarkation: day.isDisembarkation ?? false,
+      },
+    });
+  }
+
+  const internaCategoryId = requireValue(categories.interna, 'Categoria interna');
+  const externaCategoryId = requireValue(categories.externa, 'Categoria externa');
+  const internaPricing = await prisma.cruiseCabinPricing.upsert({
+    where: { cruiseId_cabinCategoryId: { cruiseId: cruise.id, cabinCategoryId: internaCategoryId } },
+    update: {},
+    create: { cruiseId: cruise.id, cabinCategoryId: internaCategoryId, price: 1900, cancellationPolicy: 'Viagem já realizada.' },
+  });
+  const externaPricing = await prisma.cruiseCabinPricing.upsert({
+    where: { cruiseId_cabinCategoryId: { cruiseId: cruise.id, cabinCategoryId: externaCategoryId } },
+    update: {},
+    create: { cruiseId: cruise.id, cabinCategoryId: externaCategoryId, price: 2400, cancellationPolicy: 'Viagem já realizada.' },
+  });
+
+  const REVIEWERS: Array<{
+    email: string;
+    fullName: string;
+    cabinCode: string;
+    categoryPricing: typeof internaPricing;
+    rating: number;
+    comment: string;
+  }> = [
+    { email: 'avaliador1@example.com', fullName: 'Beatriz Andrade', cabinCode: '4101', categoryPricing: internaPricing, rating: 5, comment: 'O show de abertura no Teatro Ondas foi de arrepiar, plateia inteira cantando junto. Já quero a próxima edição.' },
+    { email: 'avaliador2@example.com', fullName: 'Rafael Tanaka', cabinCode: '6201', categoryPricing: externaPricing, rating: 4, comment: 'Cruzeiro excelente, só achei o embarque em Santos meio demorado. Fora isso, nota 10.' },
+    { email: 'avaliador3@example.com', fullName: 'Camila Duarte', cabinCode: '6202', categoryPricing: externaPricing, rating: 5, comment: 'Cabine externa impecável, vista maravilhosa e staff super atencioso do início ao fim.' },
+    { email: 'avaliador4@example.com', fullName: 'Thiago Barbosa', cabinCode: '4102', categoryPricing: internaPricing, rating: 3, comment: 'Show bom, mas o Wi-Fi a bordo quase não funcionava — complicado pra quem precisava trabalhar remoto.' },
+    { email: 'avaliador5@example.com', fullName: 'Juliana Ferraz', cabinCode: '6203', categoryPricing: externaPricing, rating: 5, comment: 'Melhor viagem que já fiz. Fiz amizades pra vida toda com a galera do rock.' },
+    { email: 'avaliador6@example.com', fullName: 'Marcos Vinícius Reis', cabinCode: '4103', categoryPricing: internaPricing, rating: 4, comment: 'Comida do Restaurante Harmonia surpreendeu bastante, e o show acústico no Lounge Riff foi o ponto alto da viagem.' },
+    { email: 'avaliador7@example.com', fullName: 'Larissa Nogueira', cabinCode: '4104', categoryPricing: internaPricing, rating: 2, comment: 'Cabine interna bem apertada pra duas pessoas — esperava mais espaço pelo preço cobrado.' },
+    { email: 'avaliador8@example.com', fullName: 'Eduardo Salgado', cabinCode: '6204', categoryPricing: externaPricing, rating: 5, comment: 'Organização impecável, checkout tranquilo, e a festa no Palco do Deck ao pôr do sol foi inesquecível.' },
+    { email: 'avaliador9@example.com', fullName: 'Patrícia Lemos', cabinCode: '4105', categoryPricing: internaPricing, rating: 4, comment: 'Tudo muito bem cuidado. Só senti falta de mais opções vegetarianas no cardápio principal.' },
+    { email: 'avaliador10@example.com', fullName: 'Gustavo Meireles', cabinCode: '6205', categoryPricing: externaPricing, rating: 5, comment: 'Voltaria sem pensar duas vezes. Programação musical impecável do primeiro ao último dia.' },
+  ];
+
+  const passengerRole = await prisma.role.findUniqueOrThrow({ where: { key: RoleKey.PASSENGER } });
+  const reviewCreatedAt = new Date(disembarkationDate.getTime() + 2 * 24 * 60 * 60 * 1000);
+
+  for (const [index, reviewer] of REVIEWERS.entries()) {
+    const user = await prisma.user.upsert({
+      where: { email: reviewer.email },
+      update: {},
+      create: {
+        email: reviewer.email,
+        passwordHash,
+        fullName: reviewer.fullName,
+        status: 'ACTIVE',
+        emailVerifiedAt: new Date(),
+      },
+    });
+
+    const existingRole = await prisma.userRole.findFirst({
+      where: { userId: user.id, roleId: passengerRole.id, organizerId: null },
+      select: { id: true },
+    });
+    if (!existingRole) {
+      await prisma.userRole.create({ data: { userId: user.id, roleId: passengerRole.id, organizerId: null } });
+    }
+
+    const cabin = await prisma.cabin.findFirstOrThrow({ where: { code: reviewer.cabinCode, deck: { shipId } } });
+
+    const breakdown = PricingEngine.calculate({
+      cabinPrice: reviewer.categoryPricing.price,
+      passengerCount: 1,
+      addonPrices: [],
+      discountAmount: new Prisma.Decimal(0),
+    });
+
+    const bookingId = `seed-review-booking-${index + 1}`;
+    const booking = await prisma.booking.upsert({
+      where: { id: bookingId },
+      update: {},
+      create: {
+        id: bookingId,
+        userId: user.id,
+        cruiseId: cruise.id,
+        cabinId: cabin.id,
+        status: 'CONFIRMED',
+        ...breakdown,
+        currency: reviewer.categoryPricing.currency,
+        confirmedAt: embarkationDate,
+      },
+    });
+
+    await prisma.bookingGuest.upsert({
+      where: { id: `seed-review-guest-${index + 1}` },
+      update: {},
+      create: {
+        id: `seed-review-guest-${index + 1}`,
+        bookingId: booking.id,
+        fullName: reviewer.fullName,
+        documentType: 'NATIONAL_ID',
+        documentNumber: String(10000000000 + index).slice(0, 11),
+        isPrimary: true,
+      },
+    });
+
+    await prisma.payment.upsert({
+      where: { simulatedTransactionId: `SIMULATED-SEED-REVIEW-${index + 1}` },
+      update: {},
+      create: {
+        bookingId: booking.id,
+        method: 'CREDIT_CARD',
+        status: 'APPROVED',
+        amount: breakdown.totalAmount,
+        currency: reviewer.categoryPricing.currency,
+        simulatedTransactionId: `SIMULATED-SEED-REVIEW-${index + 1}`,
+        paidAt: embarkationDate,
+      },
+    });
+
+    await prisma.review.upsert({
+      where: { bookingId: booking.id },
+      update: { rating: reviewer.rating, comment: reviewer.comment, status: 'APPROVED' },
+      create: {
+        id: `seed-review-${index + 1}`,
+        bookingId: booking.id,
+        userId: user.id,
+        cruiseId: cruise.id,
+        rating: reviewer.rating,
+        comment: reviewer.comment,
+        status: 'APPROVED',
+        moderatedAt: reviewCreatedAt,
+        moderatedByUserId,
+        createdAt: reviewCreatedAt,
+      },
+    });
+  }
+
+  return cruise;
+}
+
 async function main(): Promise<void> {
   console.log('Seeding SeaPass — dados de demonstração...');
 
@@ -1053,6 +1243,7 @@ async function main(): Promise<void> {
   const cruise = await seedHeavyMetalCruise(rockInSea.id, ship.id, ports, categories, venues);
   await seedCabinAvailabilityDemoData(cruise.id, decks, categories, users);
   const additionalCruises = await seedAdditionalCruises(rockInSea.id, ship.id, ports, categories);
+  const pastCruise = await seedPastVoyageWithReviews(rockInSea.id, ship.id, ports, categories, passwordHash, users.organizerAdmin.id);
 
   console.log('Seed concluído com sucesso.');
   console.log('');
@@ -1068,6 +1259,7 @@ async function main(): Promise<void> {
   for (const c of additionalCruises) {
     console.log(`  - "${c.title}" (slug: ${c.slug})`);
   }
+  console.log(`  - "${pastCruise.title}" (slug: ${pastCruise.slug}) — 10 avaliações já aprovadas`);
 }
 
 main()

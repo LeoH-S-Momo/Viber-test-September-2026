@@ -158,6 +158,65 @@ export function bookingCancelledContent(ctx: BookingCancelledContext): Notificat
   return { subject, text, html };
 }
 
+export interface PaymentRefundedContext {
+  fullName: string;
+  cruiseTitle: string;
+  amount: string;
+  fullyRefunded: boolean;
+}
+
+export function paymentRefundedContent(ctx: PaymentRefundedContext): NotificationContent {
+  const subject = `Reembolso ${ctx.fullyRefunded ? 'processado' : 'parcial'} — ${ctx.cruiseTitle}`;
+  const text = `Olá, ${ctx.fullName}! Recebemos a confirmação do reembolso de ${formatPrice(ctx.amount)} referente ao cruzeiro "${ctx.cruiseTitle}". ${ctx.fullyRefunded ? 'O valor total pago já foi reembolsado.' : 'Este foi um reembolso parcial — o restante do valor pago permanece válido.'}`;
+  const html = wrapHtml('Reembolso processado 💳', [
+    `Olá, <strong>${ctx.fullName}</strong>!`,
+    `Recebemos a confirmação do reembolso de <strong>${formatPrice(ctx.amount)}</strong> referente ao cruzeiro <strong>${ctx.cruiseTitle}</strong>.`,
+    ctx.fullyRefunded
+      ? 'O valor total pago já foi reembolsado.'
+      : 'Este foi um reembolso parcial — o restante do valor pago permanece válido.',
+  ]);
+  return { subject, text, html };
+}
+
+export interface ReviewSubmittedContext {
+  organizerContactName: string;
+  cruiseTitle: string;
+  rating: number;
+}
+
+export function reviewSubmittedContent(ctx: ReviewSubmittedContext): NotificationContent {
+  const subject = `Nova avaliação para moderar — ${ctx.cruiseTitle}`;
+  const text = `Olá, ${ctx.organizerContactName}! Uma nova avaliação (${ctx.rating}/5) chegou para o cruzeiro "${ctx.cruiseTitle}" e está aguardando moderação no painel do organizador.`;
+  const html = wrapHtml('Nova avaliação para moderar ⭐', [
+    `Olá, <strong>${ctx.organizerContactName}</strong>!`,
+    `Uma nova avaliação (<strong>${ctx.rating}/5</strong>) chegou para <strong>${ctx.cruiseTitle}</strong> e está aguardando moderação.`,
+  ]);
+  return { subject, text, html };
+}
+
+export interface ReviewModeratedContext {
+  fullName: string;
+  cruiseTitle: string;
+  status: 'APPROVED' | 'REJECTED' | 'HIDDEN';
+}
+
+const REVIEW_STATUS_LABEL: Record<ReviewModeratedContext['status'], string> = {
+  APPROVED: 'aprovada e já está visível na página do cruzeiro',
+  REJECTED: 'não aprovada para publicação',
+  HIDDEN: 'removida da página do cruzeiro',
+};
+
+export function reviewModeratedContent(ctx: ReviewModeratedContext): NotificationContent {
+  const label = REVIEW_STATUS_LABEL[ctx.status];
+  const subject = `Sua avaliação foi moderada — ${ctx.cruiseTitle}`;
+  const text = `Olá, ${ctx.fullName}. Sua avaliação do cruzeiro "${ctx.cruiseTitle}" foi ${label}.`;
+  const html = wrapHtml('Sua avaliação foi moderada', [
+    `Olá, <strong>${ctx.fullName}</strong>.`,
+    `Sua avaliação do cruzeiro <strong>${ctx.cruiseTitle}</strong> foi ${label}.`,
+  ]);
+  return { subject, text, html };
+}
+
 /** Usado so pra type-narrow no chamador (ver NotificationsService) — nunca precisa de fato ser chamado com GENERIC. */
 export function genericContent(subject: string, text: string): NotificationContent {
   return { subject, text, html: wrapHtml(subject, [text]) };

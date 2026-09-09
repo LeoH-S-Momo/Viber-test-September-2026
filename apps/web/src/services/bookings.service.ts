@@ -33,10 +33,11 @@ export async function checkoutBooking(
   accessToken: string,
   bookingId: string,
   paymentMethod: 'CREDIT_CARD' | 'PIX' | 'BOLETO',
+  installments = 1,
 ): Promise<ServiceResult<BookingHold>> {
   return authFetchJson<BookingHold>(`/bookings/${bookingId}/checkout`, accessToken, {
     method: 'POST',
-    body: JSON.stringify({ paymentMethod }),
+    body: JSON.stringify({ paymentMethod, installments }),
   });
 }
 

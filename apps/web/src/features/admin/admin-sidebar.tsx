@@ -7,6 +7,7 @@ import {
   CalendarRange,
   DoorClosed,
   FileClock,
+  FlaskConical,
   Mic2,
   ScanLine,
   Ship,
@@ -32,6 +33,7 @@ const LINKS = [
   { href: '/admin/cupons', label: 'Cupons', icon: Tag },
   { href: '/admin/tickets', label: 'Tickets', icon: Ticket },
   { href: '/admin/check-ins', label: 'Check-ins', icon: ScanLine },
+  { href: '/admin/feature-flags', label: 'Feature flags', icon: FlaskConical },
   { href: '/admin/auditoria', label: 'Auditoria', icon: FileClock },
 ];
 

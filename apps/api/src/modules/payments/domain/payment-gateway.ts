@@ -54,6 +54,19 @@ export class PaymentGatewayTimeoutError extends Error {
   }
 }
 
+export interface RefundRequest {
+  gatewayTransactionId: string;
+  /** Sempre <= o que foi cobrado — validado pelo dominio (ver PaymentsService.issueRefund), nao pelo gateway. */
+  amount: Prisma.Decimal;
+  reason: string;
+}
+
+export interface RefundResult {
+  outcome: 'COMPLETED' | 'FAILED';
+  gatewayRefundId: string;
+  failureReason?: string;
+}
+
 export interface PaymentGateway {
   /** Tenta cobrar. Pode lancar `PaymentGatewayTimeoutError` — nunca deve ser chamado de novo com uma chave diferente so por isso (ver ADR). */
   charge(request: ChargeRequest): Promise<ChargeResult>;
@@ -67,4 +80,7 @@ export interface PaymentGateway {
    * pode ter completado do lado do gateway).
    */
   retrieve(gatewayTransactionId: string): Promise<ChargeResult>;
+
+  /** Devolve dinheiro de uma cobranca ja aprovada — parcial ou total (ver PaymentsService.issueRefund). */
+  refund(request: RefundRequest): Promise<RefundResult>;
 }

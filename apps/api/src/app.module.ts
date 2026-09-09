@@ -23,6 +23,9 @@ import { BookingsModule } from './modules/bookings/bookings.module';
 import { TicketsModule } from './modules/tickets/tickets.module';
 import { ActivitiesModule } from './modules/activities/activities.module';
 import { AdminModule } from './modules/admin/admin.module';
+import { FeatureFlagsModule } from './modules/feature-flags/feature-flags.module';
+import { ReviewsModule } from './modules/reviews/reviews.module';
+import { WebhooksModule } from './modules/webhooks/webhooks.module';
 
 @Module({
   imports: [
@@ -91,6 +94,9 @@ import { AdminModule } from './modules/admin/admin.module';
     TicketsModule,
     ActivitiesModule,
     AdminModule,
+    FeatureFlagsModule,
+    ReviewsModule,
+    WebhooksModule,
   ],
   providers: [
     // Ordem importa — os APP_GUARD rodam na ordem registrada aqui, entao o limite de taxa

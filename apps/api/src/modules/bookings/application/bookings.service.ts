@@ -17,6 +17,7 @@ import { ActivitiesService } from '../../activities/application/activities.servi
 import { ActivityCapacityPolicy } from '../../activities/domain/activity-capacity.policy';
 import { CouponPolicy } from '../../pricing/domain/coupon.policy';
 import { PricingEngine } from '../../pricing/domain/pricing-engine';
+import { InstallmentPricing } from '../../payments/domain/installment-pricing';
 import type { PricingBreakdown } from '../../pricing/domain/pricing.types';
 import {
   PAYMENT_GATEWAY,
@@ -332,8 +333,17 @@ export class BookingsService {
    * chamada de rede — ver ADR-0012) — por isso o metodo abre DUAS
    * transacoes, uma antes e outra depois de `paymentGateway.charge`.
    */
-  async checkout(bookingId: string, userId: string, paymentMethod: PaymentMethod, idempotencyKey?: string) {
+  async checkout(
+    bookingId: string,
+    userId: string,
+    paymentMethod: PaymentMethod,
+    idempotencyKey?: string,
+    installments = 1,
+  ) {
     const now = new Date();
+    // So cartao parcela — PIX/boleto ignoram silenciosamente qualquer valor enviado (nunca confia
+    // no client pra decidir se o metodo comporta parcelamento, ver ADR do parcelamento).
+    const effectiveInstallments = paymentMethod === PaymentMethod.CREDIT_CARD ? installments : 1;
 
     const prepared = await this.prisma.$transaction(async (tx) => {
       const locked = await this.bookingsRepository.lockBookingForUpdate(tx, bookingId);
@@ -352,7 +362,7 @@ export class BookingsService {
         return { alreadyConfirmed: current };
       }
 
-      let existingPayment: { id: string; method: PaymentMethod } | null = null;
+      let existingPayment: { id: string; method: PaymentMethod; amount: Prisma.Decimal } | null = null;
 
       if (locked.status === BookingStatus.PAYMENT_PENDING) {
         if (BookingLifecyclePolicy.isHoldExpired(locked, now)) {
@@ -386,14 +396,23 @@ export class BookingsService {
       });
 
       if (existingPayment) {
-        return { payment: { id: existingPayment.id, amount: breakdown.totalAmount, currency: 'BRL' } };
+        // Retry de um checkout ja em andamento — cobra de novo o mesmo valor JA congelado na
+        // primeira tentativa (com juros de parcelamento, se houver), nunca recalculado aqui: um
+        // retry nao pode mudar quantas parcelas o passageiro escolheu.
+        return { payment: { id: existingPayment.id, amount: existingPayment.amount, currency: 'BRL' } };
       }
+
+      // Parcelamento (mockado, so CREDIT_CARD — ver InstallmentPricing): `amount` cobrado do
+      // gateway ja inclui os juros; `Booking.totalAmount` (em `breakdown`, gravado acima) continua
+      // sendo o preco da viagem, sem juros — os dois numeros divergem de proposito.
+      const { totalAmount: chargeAmount } = InstallmentPricing.calculate(breakdown.totalAmount, effectiveInstallments);
 
       const payment = await this.bookingsRepository.createPayment(tx, {
         bookingId,
         method: paymentMethod,
-        amount: breakdown.totalAmount,
+        amount: chargeAmount,
         currency: 'BRL',
+        installments: effectiveInstallments,
         // Placeholder — o id de verdade so existe depois da resposta do gateway (ver Payment.simulatedTransactionId).
         simulatedTransactionId: `PENDING-${randomUUID()}`,
       });
@@ -448,6 +467,30 @@ export class BookingsService {
     const result = await this.paymentGateway.retrieve(payment.simulatedTransactionId);
 
     const { booking: finalBooking, paymentOutcome } = await this.applyChargeOutcome(bookingId, payment.id, result, false);
+    await this.onOutcomeApplied(finalBooking, payment.id, paymentOutcome);
+    return finalBooking;
+  }
+
+  /**
+   * Mesmo pipeline de `confirmPayment`, mas para o webhook de pagamento (ver WebhooksModule):
+   * chamado pelo SISTEMA (gateway), nao por um passageiro autenticado — por isso localiza o
+   * Payment pelo id de transacao do gateway em vez de bookingId+userId, e nao faz checagem de
+   * posse (nao existe "dono" de uma chamada de webhook). Mesma filosofia de nunca confiar no
+   * payload do callback: sempre `retrieve()` do gateway antes de aplicar qualquer coisa. Devolve
+   * `null` quando o id de transacao e desconhecido (o controller trata como 404).
+   */
+  async confirmPaymentByTransactionId(gatewayTransactionId: string) {
+    const payment = await this.bookingsRepository.findPaymentByTransactionId(gatewayTransactionId);
+    if (!payment) {
+      return null;
+    }
+    if (payment.status !== PaymentStatus.PENDING) {
+      // Ja resolvido — idempotente, nao rechama o gateway nem reemite eventos.
+      return this.prisma.booking.findUniqueOrThrow({ where: { id: payment.bookingId } });
+    }
+
+    const result = await this.paymentGateway.retrieve(gatewayTransactionId);
+    const { booking: finalBooking, paymentOutcome } = await this.applyChargeOutcome(payment.bookingId, payment.id, result, false);
     await this.onOutcomeApplied(finalBooking, payment.id, paymentOutcome);
     return finalBooking;
   }

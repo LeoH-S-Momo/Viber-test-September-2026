@@ -1387,4 +1387,89 @@ qualquer menção ao painel admin/hardening no README anterior.
 apresentar o projeto num processo seletivo, com instrução direta de corrigir incrementalmente
 (nunca reescrever o que já funciona) e documentar de forma profissional o resultado.
 
+---
+
+## 2026-09-08 — 5 novas funcionalidades: avaliações, reembolso, parcelamento, webhook de pagamento, feature flags
+
+**O quê:** implementadas 5 funcionalidades de expansão do produto, seguindo a mesma arquitetura em
+camadas (`presentation/ → application/ → domain/ → persistence/`), validação 100% via Zod
+compartilhado (`@seapass/contracts`) e a regra "404 nunca 403" já estabelecidas no projeto:
+
+- **Avaliações pós-viagem com moderação** (`modules/reviews/`): passageiro avalia (1-5 estrelas +
+  comentário) uma reserva `CONFIRMED` só depois que `Cruise.disembarkationDate` já passou
+  (`ReviewEligibilityPolicy`); organizador modera (`PENDING → APPROVED/REJECTED → HIDDEN`,
+  `ReviewModerationPolicy`, transições inválidas rejeitadas); só `APPROVED` aparece na página
+  pública do cruzeiro. Duas notificações novas (`REVIEW_SUBMITTED` pro organizador,
+  `REVIEW_MODERATED` pro passageiro).
+- **Reembolso parcial/total rastreável, mockado** (novo `Refund` model + `payments.controller.ts`):
+  múltiplos reembolsos por `Payment` até esgotar o valor pago (`PARTIALLY_REFUNDED` → `REFUNDED`),
+  mesmo padrão de 2 transações + chamada de gateway fora de transação do checkout
+  (`PaymentGateway.refund`, mockado com o mesmo sufixo mágico `::fail` de `charge`/`::decline`).
+  Isolamento multi-tenant: `PLATFORM_ADMIN` sem restrição, `ORGANIZER_ADMIN` só nos próprios
+  pagamentos (404, não 403, se não bater).
+- **Parcelamento no cartão com juros, mockado** (`domain/installment-pricing.ts`): Tabela Price
+  (juros compostos) — 1x sem juros, 2x-6x a 1,99% a.m., 7x-12x a 2,49% a.m. `Payment.amount` passa
+  a ser o total COM juros quando `installments > 1`; `Booking.totalAmount` continua sendo o preço
+  da viagem, sem juros — os dois divergem de propósito.
+- **Webhook de confirmação de pagamento assinado, mockado** (`modules/webhooks/`): endpoint público
+  `POST /webhooks/payments`, autenticado por assinatura HMAC-SHA256 sobre o corpo cru
+  (`X-Webhook-Signature`, `main.ts` ganhou `rawBody: true`), idempotente por `X-Webhook-Event-Id`
+  (`WebhookEvent` model). Nunca confia no `outcome` do payload — sempre reconsulta o gateway via
+  `BookingsService.confirmPaymentByTransactionId` (extraído de `confirmPayment`, mesma filosofia
+  "nunca confiar no callback" do ADR-0012). Alvo real: boleto, que já ficava `PENDING` até algo
+  confirmar.
+- **Feature flags por organizador — beta controlado** (`modules/feature-flags/`): catálogo fixo de
+  3 flags de exemplo, subsistema de gestão independente (não gateia nenhuma feature real deste
+  pacote — decisão deliberada, é a base reutilizável para gating futuro). Só `PLATFORM_ADMIN`
+  altera; organizador só lê o próprio estado.
+
+Schema: 1 migração por grupo lógico (`reviews_refunds_installments_webhooks_feature_flags` +
+`notification_types_refund_review`), escritas à mão (o usuário `seapass` local não tem permissão
+`CREATEDB` pro shadow database do `prisma migrate dev` — aplicadas via `prisma migrate deploy`,
+que não precisa dele).
+
+**Testado:** 28 testes unitários novos (`installment-pricing`, `review-eligibility.policy`,
+`review-moderation.policy`, `webhooks.service` — assinatura válida/inválida/adulterada, dedupe por
+`eventId`) + suíte completa depois: 302 unitários + 141 integração (API) todos verdes,
+`typecheck` limpo em `apps/api` e `apps/web`. Smoke test manual dos 5 endpoints novos com os dev
+servers rodando de verdade (parcelamento calcula juros corretos, webhook rejeita assinatura
+inválida com 401, avaliações públicas respondem com a forma paginada certa).
+
+**Por quê:** pedido explícito do usuário — escolheu 5 das 30 sugestões de expansão do produto que
+ele mesmo pediu antes, priorizando cobrir domínios que o projeto ainda não demonstrava (moderação
+de conteúdo, reversão financeira, precificação com juros, confirmação assíncrona assinada,
+controle de rollout por tenant), mantendo o mesmo rigor de transação/idempotência/isolamento do
+resto do projeto mesmo nas partes mockadas.
+
+---
+
+## 2026-09-08 — Dados de demonstração para avaliações + correção de bug de idempotência no seed
+
+**O quê:** adicionada `seedPastVoyageWithReviews()` ao seed (`apps/api/src/database/prisma/seed.ts`):
+um cruzeiro "já navegado" (embarque/desembarque em julho de 2026, antes de qualquer data possível
+do sistema) com 10 passageiros, reservas `CONFIRMED` e avaliações já `APPROVED` — nenhum cruzeiro
+de demonstração existente tinha `disembarkationDate` no passado, então a feature de avaliações
+(entregue no registro anterior) não tinha como ter dado nenhum exemplo visível sem isso. Notas
+variadas (2 a 5, média 4.2) e comentários referenciando locais reais do navio (Teatro Ondas,
+Restaurante Harmonia, Lounge Riff, Palco do Deck), para soar como avaliações de verdade, não
+placeholder.
+
+**Bug encontrado e corrigido:** `seedHeavyMetalCruise()` fazia `upsert` casando pelo slug ANTIGO
+do cruzeiro (`rock-in-sea-classicos-do-rock`) para renomeá-lo pro slug atual — comportamento
+correto só na primeira execução após o rename; toda execução seguinte do `pnpm db:seed` (o slug
+antigo não existe mais) caía no branch `create` tentando inserir o slug NOVO, que já existe →
+`Unique constraint failed`, quebrando o seed inteiro. Corrigido pra casar pelo slug atual.
+
+**Bug encontrado e corrigido (frontend):** `CruiseReviews` concatenava `avaliação` + `ões` pro
+plural, produzindo "avaliaçãoões" — substituído por troca de palavra inteira (`avaliação` /
+`avaliações`), achado ao verificar visualmente a página com os dados novos.
+
+**Testado:** `pnpm db:seed` rodado até o fim sem erro; `GET /cruises/:slug/reviews` e a página
+pública do cruzeiro conferidos manualmente com os dev servers no ar — 10 avaliações, nota média
+4.2, texto de pluralização correto.
+
+**Por quê:** pedido explícito do usuário, que não encontrou nenhuma avaliação/comentário
+disponível depois da feature entregue no registro anterior — o gap era real (nenhum booking do
+seed era elegível pra avaliação).
+
 <!-- Novas entradas são adicionadas ao final, em ordem cronológica, cada uma com data, "O quê" e "Por quê". -->

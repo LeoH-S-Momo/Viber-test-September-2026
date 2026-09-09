@@ -124,6 +124,10 @@ export class OrganizersService {
           cabin: { select: { code: true, cabinCategory: { select: { name: true } } } },
           user: { select: { fullName: true, email: true } },
           guests: { select: { id: true, fullName: true, isPrimary: true } },
+          // So o pagamento mais recente (nao todo o historico de tentativas) — o suficiente pra
+          // decidir se cabe um botao de reembolso na listagem, sem inflar a resposta com retries
+          // antigos que ninguem olha aqui.
+          payments: { orderBy: { createdAt: 'desc' }, take: 1, select: { id: true, status: true, amount: true } },
         },
       }),
       this.prisma.booking.count({ where }),

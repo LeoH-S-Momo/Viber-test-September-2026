@@ -173,7 +173,11 @@ function EditCruiseContent({ cruiseId }: { cruiseId: string }) {
       setSaveError(result.message);
       return;
     }
-    setCruise(result.data);
+    // `PATCH /cruises/:id` devolve so a linha crua do cruzeiro, sem `ship`/`organizer`/
+    // `cabinPricings` (ver CruisesRepository.update) — usar `result.data` direto quebraria o
+    // render abaixo (`cruise.ship.name`). Mesmo padrão de `handlePublishToggle`: re-busca o
+    // detalhe completo em vez de confiar no corpo da resposta do PATCH.
+    await load();
     setSavedAt(Date.now());
   }
 

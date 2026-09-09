@@ -14,8 +14,10 @@ import {
   updateBookingDetails,
   type GuestFormInput,
 } from '@/services/bookings.service';
+import { getInstallmentOptions } from '@/services/payments.service';
 import type { BookingHold } from '@/types/booking';
 import type { DeckMapCabin, DeckMapDeck } from '@/types/ship-map';
+import type { InstallmentOptionView } from '@seapass/contracts';
 
 type Step =
   | { name: 'holding' }
@@ -69,6 +71,8 @@ export function BookingModal({
   const [guests, setGuests] = useState<GuestFormInput[]>([emptyGuest(true)]);
   const [couponCode, setCouponCode] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('PIX');
+  const [installments, setInstallments] = useState(1);
+  const [installmentOptions, setInstallmentOptions] = useState<InstallmentOptionView[] | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -134,11 +138,26 @@ export function BookingModal({
     setStep({ name: 'payment', booking: result.data });
   }
 
+  useEffect(() => {
+    if (step.name !== 'payment' || paymentMethod !== 'CREDIT_CARD') {
+      setInstallments(1);
+      return;
+    }
+    let cancelled = false;
+    getInstallmentOptions(Number(step.booking.totalAmount)).then((result) => {
+      if (!cancelled && result.ok) setInstallmentOptions(result.data);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- so precisa reagir a troca de metodo, o total nao muda dentro do passo de pagamento
+  }, [step.name, paymentMethod]);
+
   async function handleCheckout() {
     if (step.name !== 'payment') return;
     setFormError(null);
     setSubmitting(true);
-    const result = await checkoutBooking(accessToken, step.booking.id, paymentMethod);
+    const result = await checkoutBooking(accessToken, step.booking.id, paymentMethod, installments);
     setSubmitting(false);
     if (!result.ok) {
       setFormError(result.message);
@@ -327,6 +346,29 @@ export function BookingModal({
               </label>
             ))}
           </fieldset>
+
+          {paymentMethod === 'CREDIT_CARD' && (
+            <div className="flex flex-col gap-1">
+              <label htmlFor="installments" className="text-xs font-medium text-slate-700">
+                Parcelas
+              </label>
+              <select
+                id="installments"
+                value={installments}
+                onChange={(e) => setInstallments(Number(e.target.value))}
+                disabled={!installmentOptions}
+                className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+              >
+                {!installmentOptions && <option>Calculando…</option>}
+                {installmentOptions?.map((option) => (
+                  <option key={option.installments} value={option.installments}>
+                    {option.installments}x de {formatPrice(option.installmentAmount)}
+                    {option.interestRate > 0 ? ` (total ${formatPrice(option.totalAmount)})` : ' sem juros'}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {formError && (
             <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">

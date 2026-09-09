@@ -18,6 +18,8 @@ import { AddActivityForms } from '@/features/trip/add-activity-forms';
 import { TripExperiences } from '@/features/trip/trip-experiences';
 import { TripHero } from '@/features/trip/trip-hero';
 import { TripInfo } from '@/features/trip/trip-info';
+import { TripRefunds } from '@/features/trip/trip-refunds';
+import { TripReview } from '@/features/trip/trip-review';
 import { TripTickets } from '@/features/trip/trip-tickets';
 import { TripTimelineView } from '@/features/trip/trip-timeline-view';
 import type { MyBooking } from '@/types/booking';
@@ -217,6 +219,10 @@ function TripView() {
       <TripExperiences experiences={booking.experiences} />
 
       {catalog && <TripInfo booking={booking} catalog={catalog} />}
+
+      <TripRefunds bookingId={booking.id} accessToken={accessToken} />
+
+      {catalog && <TripReview bookingId={booking.id} accessToken={accessToken} disembarkationDate={catalog.disembarkationDate} />}
     </div>
   );
 }

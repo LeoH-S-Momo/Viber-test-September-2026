@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ActivitiesModule } from '../activities/activities.module';
 import { TicketsModule } from '../tickets/tickets.module';
+import { FeatureFlagsModule } from '../feature-flags/feature-flags.module';
 import { AdminController } from './admin.controller';
 import { AdminService } from './admin.service';
 import { AdminUsersController } from './admin-users.controller';
@@ -11,6 +12,7 @@ import { AdminSalesController } from './admin-sales.controller';
 import { AdminSalesService } from './admin-sales.service';
 import { AdminCouponsController } from './admin-coupons.controller';
 import { AdminCouponsService } from './admin-coupons.service';
+import { AdminFeatureFlagsController } from './admin-feature-flags.controller';
 
 /**
  * Painel administrativo global (ver ADR-0018) — 13 modulos de leitura/gestao
@@ -27,8 +29,15 @@ import { AdminCouponsService } from './admin-coupons.service';
  * (AdminCatalogService).
  */
 @Module({
-  imports: [TicketsModule, ActivitiesModule],
-  controllers: [AdminController, AdminUsersController, AdminCatalogController, AdminSalesController, AdminCouponsController],
+  imports: [TicketsModule, ActivitiesModule, FeatureFlagsModule],
+  controllers: [
+    AdminController,
+    AdminUsersController,
+    AdminCatalogController,
+    AdminSalesController,
+    AdminCouponsController,
+    AdminFeatureFlagsController,
+  ],
   providers: [AdminService, AdminUsersService, AdminCatalogService, AdminSalesService, AdminCouponsService],
 })
 export class AdminModule {}

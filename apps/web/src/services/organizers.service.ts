@@ -99,8 +99,9 @@ export function createCruise(accessToken: string, input: CreateCruiseInput): Pro
   return authFetchJson<CruiseDetail>('/cruises', accessToken, { method: 'POST', body: JSON.stringify(input) });
 }
 
-export function updateCruise(accessToken: string, id: string, input: UpdateCruiseInput): Promise<ServiceResult<CruiseDetail>> {
-  return authFetchJson<CruiseDetail>(`/cruises/${id}`, accessToken, { method: 'PATCH', body: JSON.stringify(input) });
+/** Devolve so a linha crua do cruzeiro (sem `ship`/`organizer`/`cabinPricings` — ver CruisesRepository.update), nao um `CruiseDetail` completo; chamadores que precisam do detalhe completo devem rebuscar via `getCruiseById`. */
+export function updateCruise(accessToken: string, id: string, input: UpdateCruiseInput): Promise<ServiceResult<unknown>> {
+  return authFetchJson(`/cruises/${id}`, accessToken, { method: 'PATCH', body: JSON.stringify(input) });
 }
 
 export function setCruisePricing(

@@ -381,7 +381,14 @@ export class BookingsRepository {
 
   createPayment(
     tx: Prisma.TransactionClient,
-    data: { bookingId: string; method: PaymentMethod; amount: Prisma.Decimal; currency: string; simulatedTransactionId: string },
+    data: {
+      bookingId: string;
+      method: PaymentMethod;
+      amount: Prisma.Decimal;
+      currency: string;
+      simulatedTransactionId: string;
+      installments: number;
+    },
   ) {
     return tx.payment.create({ data: { ...data, status: PaymentStatus.PENDING } });
   }
@@ -389,6 +396,11 @@ export class BookingsRepository {
   /** A tentativa de pagamento mais recente, qualquer status — usada para decidir se um checkout repetido e retry ou duplicata (ver ADR-0012). */
   findLatestPayment(tx: Prisma.TransactionClient, bookingId: string) {
     return tx.payment.findFirst({ where: { bookingId }, orderBy: { createdAt: 'desc' } });
+  }
+
+  /** Usado pelo webhook de pagamento (ver WebhooksService) — o gateway so conhece o proprio id de transacao, nunca o bookingId. */
+  findPaymentByTransactionId(simulatedTransactionId: string) {
+    return this.prisma.payment.findUnique({ where: { simulatedTransactionId } });
   }
 
   /**

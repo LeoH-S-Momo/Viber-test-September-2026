@@ -9,6 +9,7 @@ import { RequireRole } from '@/components/require-role';
 import { useAuth } from '@/lib/auth-context';
 import { formatPrice } from '@/lib/format';
 import { getDashboard, getMyCruises } from '@/services/organizers.service';
+import { BetaFeatures } from '@/features/organizer/beta-features';
 import { DashboardFilters, periodDaysToRange, type DashboardFiltersValue } from '@/features/organizer/dashboard-filters';
 import { StatCard } from '@/features/organizer/dashboard/stat-card';
 import { RevenueChart } from '@/features/organizer/dashboard/revenue-chart';
@@ -113,6 +114,8 @@ function DashboardContent() {
               />
             </div>
           </div>
+
+          <BetaFeatures />
         </div>
       )}
     </>

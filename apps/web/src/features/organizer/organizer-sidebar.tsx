@@ -9,6 +9,7 @@ import {
   ScanLine,
   Ship,
   Sparkles,
+  Star,
   Ticket,
   UtensilsCrossed,
   Users,
@@ -24,6 +25,7 @@ const LINKS = [
   { href: '/organizador/experiencias', label: 'Experiências', icon: Sparkles },
   { href: '/organizador/reservas', label: 'Reservas', icon: Ticket },
   { href: '/organizador/passageiros', label: 'Passageiros', icon: Users },
+  { href: '/organizador/avaliacoes', label: 'Avaliações', icon: Star },
   { href: '/organizador/relatorios', label: 'Relatórios', icon: FileBarChart },
   { href: '/organizador/check-in', label: 'Check-in', icon: ScanLine },
 ];

@@ -42,6 +42,9 @@ export const envSchema = z
     SMTP_FROM: z.string().default('SeaPass <no-reply@seapass.com>'),
     /** Antecedencia do lembrete de embarque (ver BookingsService/NotificationsListener) — horas antes de `embarkationDate`. */
     BOARDING_REMINDER_HOURS_BEFORE: z.coerce.number().int().positive().default(24),
+
+    /** Segredo HMAC do webhook de confirmacao de pagamento (mockado, ver WebhooksModule) — assina/verifica `X-Webhook-Signature`. */
+    WEBHOOK_SECRET: z.string().min(32, 'WEBHOOK_SECRET precisa ter pelo menos 32 caracteres.').default('dev-only-webhook-secret-please-change-in-prod-32chars'),
   })
   .refine((env) => env.JWT_ACCESS_SECRET !== env.JWT_REFRESH_SECRET, {
     message: 'JWT_ACCESS_SECRET e JWT_REFRESH_SECRET precisam ser diferentes um do outro.',
