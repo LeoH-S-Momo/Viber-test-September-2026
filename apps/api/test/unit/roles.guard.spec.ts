@@ -1,4 +1,4 @@
-import { ExecutionContext } from '@nestjs/common';
+import { ExecutionContext, ForbiddenException } from '@nestjs/common';
 import { RolesGuard } from '../../src/common/guards/roles.guard';
 
 function buildContext(user: unknown) {
@@ -21,7 +21,7 @@ describe('RolesGuard', () => {
     const reflector = { getAllAndOverride: jest.fn().mockReturnValue(['PLATFORM_ADMIN']) } as never;
     const guard = new RolesGuard(reflector);
 
-    expect(guard.canActivate(buildContext(undefined))).toBe(false);
+    expect(() => guard.canActivate(buildContext(undefined))).toThrow(ForbiddenException);
   });
 
   it('denies access when the user has none of the required roles', () => {
@@ -29,7 +29,9 @@ describe('RolesGuard', () => {
     const guard = new RolesGuard(reflector);
     const user = { roles: [{ key: 'PASSENGER', organizerId: null }] };
 
-    expect(guard.canActivate(buildContext(user))).toBe(false);
+    // Mensagem propria (nao o "Forbidden" generico do Nest) — ver comentario no guard sobre o
+    // cenario mais comum disto acontecer: mesmo navegador logado como outra conta.
+    expect(() => guard.canActivate(buildContext(user))).toThrow('A conta logada atualmente não tem permissão para esta ação. Saia e entre novamente com a conta correta.');
   });
 
   it('allows access when the user has at least one of the required roles', () => {
