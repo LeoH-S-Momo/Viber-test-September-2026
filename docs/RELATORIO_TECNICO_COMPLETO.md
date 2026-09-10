@@ -3,12 +3,12 @@
 > Relatório de apresentação do projeto SeaPass: plataforma de comercialização e gestão de
 > cruzeiros temáticos, construída como teste técnico para vaga de desenvolvedor(a) pleno.
 > Combina texto explicativo por seção com diagramas Mermaid (renderizam automaticamente no
-> GitHub, VS Code, Notion, Obsidian). Última atualização: 09/09/2026.
+> GitHub, VS Code, Notion, Obsidian). Última atualização: 10/09/2026.
 
 **Números do projeto:** 36 modelos de dados · 20 enums · 20 ADRs de arquitetura · 483 testes
 automatizados (302 unitários + 141 integração na API, 30 unitários + 10 E2E no frontend) · 5
 route groups no frontend (visitante, autenticação, passageiro, organizador, admin) · 12+ módulos
-de domínio no backend.
+de domínio no backend · em produção (Railway + Vercel).
 
 ---
 
@@ -24,11 +24,10 @@ de domínio no backend.
 8. [Concorrência e integridade](#8-concorrência-e-integridade)
 9. [Segurança e autorização](#9-segurança-e-autorização)
 10. [Eventos assíncronos, filas e o webhook de pagamento](#10-eventos-assíncronos-filas-e-o-webhook-de-pagamento)
-11. [As 5 funcionalidades mais recentes](#11-as-5-funcionalidades-mais-recentes)
-12. [Testes e qualidade](#12-testes-e-qualidade)
-13. [DevOps, CI/CD e observabilidade](#13-devops-cicd-e-observabilidade)
-14. [Limitações conhecidas e próximos passos](#14-limitações-conhecidas-e-próximos-passos)
-15. [Como rodar e avaliar](#15-como-rodar-e-avaliar)
+11. [Testes e qualidade](#11-testes-e-qualidade)
+12. [DevOps, CI/CD, observabilidade e produção](#12-devops-cicd-observabilidade-e-produção)
+13. [Limitações conhecidas e próximos passos](#13-limitações-conhecidas-e-próximos-passos)
+14. [Como rodar e avaliar](#14-como-rodar-e-avaliar)
 
 ---
 
@@ -66,20 +65,26 @@ Cinco personas, cada uma com sua própria superfície do sistema:
   detalhe do cruzeiro com itinerário, programação e avaliações de quem já viajou; mapa interativo
   do navio com disponibilidade de cabine em tempo real.
 - **Passageiro** — fluxo de reserva completo (hold → hóspedes → adicionais/cupom → pagamento,
-  com opção de parcelamento no cartão); ingresso digital com QR Code; reserva de eventos e
-  restaurantes a bordo; "Minha Viagem" (timeline dia a dia com o próximo compromisso em
-  destaque); avaliação da viagem após o desembarque; histórico de reembolsos.
+  com opção de parcelamento no cartão em até 12x, juros pela Tabela Price calculados só no
+  servidor); ingresso digital com QR Code; reserva de eventos e restaurantes a bordo; "Minha
+  Viagem" (timeline dia a dia com o próximo compromisso em destaque); avaliação da viagem (1–5
+  estrelas) após o desembarque, moderada pelo organizador antes de virar pública; histórico de
+  reembolsos da própria reserva.
 - **Staff do organizador** — ferramenta de check-in por código: consulta o estado do ingresso,
   confirma o embarque, uso único garantido mesmo sob tentativas simultâneas.
 - **Admin do organizador** — dashboard (receita, ocupação, ticket médio, top eventos/experiências);
   gestão de navio/cruzeiro/programação/preço; reservas e passageiros do próprio negócio; emissão
-  de reembolso; moderação das avaliações recebidas; consulta de quais recursos beta estão
-  liberados para o próprio negócio.
+  de reembolso parcial ou total *(mockado)*, rastreável até esgotar o valor pago; moderação das
+  avaliações recebidas (`PENDING → APPROVED/REJECTED → HIDDEN`); consulta de quais recursos beta
+  estão liberados para o próprio negócio.
 - **Admin da plataforma** — painel global com 14 áreas (usuários, organizadores, cruzeiros,
   navios, cabines, reservas, pagamentos, eventos, restaurantes, experiências, cupons, tickets,
   check-ins, feature flags) mais log de auditoria: aprova/suspende organizadores, cancela reserva
   ou cruzeiro inteiro em cascata, administra cupons de desconto, e libera funcionalidades em beta
-  por organizador.
+  por organizador — catálogo de 13 flags fictícias (analytics avançado, marca personalizada,
+  fidelidade, preço dinâmico, chat ao vivo, lista de espera de cabine, entre outras),
+  nenhuma gateando uma feature real hoje: é a base reutilizável para um "beta controlado" futuro,
+  não uma integração forçada.
 
 ---
 
@@ -453,7 +458,12 @@ sempre reproduzido, não recalculado.
 - **JWT com rotação de refresh token:** access token de 15 minutos vivendo só em memória no
   frontend (nunca `localStorage` — mitiga XSS), refresh token de 7 dias num cookie `httpOnly`.
   Cada uso do refresh token o invalida e emite um par novo; um token já usado sendo reapresentado
-  é tratado como possível roubo e revoga todos os tokens do usuário (detecção de reuso).
+  é tratado como possível roubo e revoga todos os tokens do usuário (detecção de reuso). Em
+  produção, frontend (Vercel) e API (Railway) são domínios diferentes — o cookie usa
+  `sameSite: 'none'` (com `secure: true`, exigido por `None`) só nesse ambiente; em dev, onde
+  front/back são same-site (mesma origem, portas diferentes), continua `'lax'`. Sem essa
+  diferenciação, o refresh silencioso cross-site nunca era enviado pelo browser e a sessão caía
+  sozinha ao voltar o foco na aba.
 - **Regra consistente de posse de recurso — "404, nunca 403":** quando um recurso pertence a
   outro organizador (ou a outro passageiro), a resposta é sempre 404 — 403 confirmaria a
   existência do recurso a quem não deveria nem saber que ele existe. Verificado com mais de 30
@@ -516,24 +526,15 @@ A assinatura é verificada com HMAC-SHA256 sobre o corpo **cru** da requisição
 reserializado) e comparada com `timingSafeEqual` — nunca uma comparação de string ingênua, que
 vazaria quantos bytes bateram por análise de tempo de resposta.
 
----
-
-## 11. As 5 funcionalidades mais recentes
-
-Cinco funcionalidades adicionadas depois da entrega inicial, todas seguindo a mesma arquitetura em
-camadas e a regra "404, nunca 403" já estabelecidas:
-
-| Funcionalidade | Resumo |
-|---|---|
-| **Avaliações pós-viagem** | Passageiro avalia (1–5 estrelas) uma reserva confirmada só depois que a viagem termina; organizador modera (`PENDING → APPROVED/REJECTED → HIDDEN`) antes de aparecer na página pública do cruzeiro. |
-| **Reembolso rastreável** *(mockado)* | Múltiplos reembolsos parciais por pagamento até esgotar o valor pago (`PARTIALLY_REFUNDED → REFUNDED`), mesmo padrão de duas transações do checkout. |
-| **Parcelamento com juros** *(mockado)* | Tabela Price (juros compostos): 1x sem juros, 2x–6x a 1,99% a.m., 7x–12x a 2,49% a.m., calculada só no servidor. |
-| **Webhook de pagamento assinado** *(mockado)* | Ver seção 10 — confirmação assíncrona (alvo real: boleto) via HMAC, idempotente por evento. |
-| **Feature flags por organizador** | Catálogo fixo de 3 flags de exemplo, liberadas individualmente por organizador só pelo admin da plataforma — a base para um "beta controlado" futuro. |
+**Reembolso rastreável** *(mockado)* segue exatamente o mesmo padrão de duas transações do
+checkout: `SELECT ... FOR UPDATE` no pagamento antes de somar o que já foi devolvido, chamada ao
+gateway fora da transação, aplicação do desfecho (`PARTIALLY_REFUNDED`/`REFUNDED`) numa segunda
+transação. Múltiplos reembolsos parciais são permitidos até esgotar o valor pago, sempre isolado
+por organizador (404, nunca 403, pra reembolso de fora do próprio negócio).
 
 ---
 
-## 12. Testes e qualidade
+## 11. Testes e qualidade
 
 | Camada | Quantidade | O que prova |
 |---|---|---|
@@ -548,7 +549,7 @@ sequenciais disfarçadas de simultâneas.
 
 ---
 
-## 13. DevOps, CI/CD e observabilidade
+## 12. DevOps, CI/CD, observabilidade e produção
 
 Pipeline de CI (GitHub Actions) em 4 estágios encadeados:
 
@@ -566,9 +567,19 @@ correlacionando cada requisição, e `GET /health` agregando o status real de Po
 Métricas e tracing (Prometheus/OpenTelemetry) ficam documentados como próximo passo, não como algo
 parcialmente implementado.
 
+**Em produção:** API + Postgres + Redis na Railway, frontend na Vercel — deploy automático a cada
+`push` na `main`. Duas armadilhas reais de empacotamento resolvidas no `Dockerfile` multi-stage
+(`infra/docker/api.Dockerfile`): `pnpm deploy --prod` roda o `prisma generate` do próprio
+`postinstall` durante o empacotamento, mas o Client gerado não sobrevive na pasta final —
+corrigido gerando de novo, explicitamente, depois do `deploy` já ter empacotado tudo; e o Alpine
+da imagem base não vem com OpenSSL, fazendo o Prisma "chutar" a versão de libssl do query engine
+(`apk add --no-cache openssl` no estágio base). Migrations rodam sozinhas (`prisma migrate
+deploy`) a cada boot do container, antes do servidor subir — nunca dependem de um passo manual
+pós-deploy.
+
 ---
 
-## 14. Limitações conhecidas e próximos passos
+## 13. Limitações conhecidas e próximos passos
 
 Escopo deliberadamente fora desta entrega — decidido, não esquecido: gateway de pagamento real
 (a interface `PaymentGateway` já está pronta para receber uma implementação real sem tocar no
@@ -584,9 +595,12 @@ suficiente para justificar a divisão agora).
 
 ---
 
-## 15. Como rodar e avaliar
+## 14. Como rodar e avaliar
 
-Tudo abaixo roda localmente com Docker + pnpm — nenhuma conta externa nem chave de API necessária.
+**Direto no navegador, sem instalar nada:** https://viber-test-september-2026-web.vercel.app (API
+em `https://seapass-seapass-env.up.railway.app`).
+
+Ou tudo abaixo, localmente, com Docker + pnpm — nenhuma conta externa nem chave de API necessária.
 
 ```bash
 docker compose -f infra/docker-compose.yml up -d
