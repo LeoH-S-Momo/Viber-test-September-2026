@@ -8,14 +8,38 @@ const prisma = new PrismaClient();
 const TEST_PASSWORD = 'Seapass@123';
 
 /**
- * Foto real e estavel por cruzeiro (nao ha upload de imagem implementado ainda — ver
- * `coverImageUrl` opcional no schema e o fallback em gradiente de `CoverArt`). Picsum Photos
- * (`picsum.photos/seed/...`) devolve sempre a MESMA fotografia pro mesmo seed — usar o slug do
- * cruzeiro garante uma imagem diferente por card, sem depender de curadoria manual de fotos por
- * tema nem de licenciamento incerto de um banco de imagens de terceiros.
+ * Foto real de navio de cruzeiro por cruzeiro de demonstracao (nao ha upload de imagem
+ * implementado ainda — ver `coverImageUrl` opcional no schema e o fallback em gradiente de
+ * `CoverArt`). Fotos do Wikimedia Commons (dominio publico / CC), uma por cruzeiro, verificadas
+ * visualmente uma a uma antes de entrar aqui — a primeira tentativa usou Picsum Photos (fotos
+ * aleatorias por seed) e o resultado nao tinha nada a ver com navio, so por coincidencia
+ * parecer "diferente por card". `Special:FilePath` e o jeito estavel de linkar direto o arquivo
+ * atual sem precisar do caminho com hash do upload.wikimedia.org.
  */
+const CRUISE_COVER_IMAGES: Record<string, string> = {
+  'heavy-metal-do-leo-sensations':
+    'https://commons.wikimedia.org/wiki/Special:FilePath/Carnival_Paradise_Anchored_off_of_Belize_city.jpg?width=800',
+  'marcello-nicolielo-so-as-melhores':
+    'https://commons.wikimedia.org/wiki/Special:FilePath/LunaMiamiApr252006.jpg?width=800',
+  'paulo-sudre-e-os-mutantes-agitam-o-salao':
+    'https://commons.wikimedia.org/wiki/Special:FilePath/Crown_Iris_at_Santorini_(Picture_taken_from_a_small_boat_taking_passangers_to_the_port).jpg?width=800',
+  'pagodao-com-thacio-moraes':
+    'https://commons.wikimedia.org/wiki/Special:FilePath/Costa_Pacifica_abeam_of_Rinuzi.jpg?width=800',
+  'claude-beats-24h-non-stop-techno':
+    'https://commons.wikimedia.org/wiki/Special:FilePath/Viking_Mira_20260807_Stavanger_2.jpg?width=800',
+  'the-amazing-gemini-and-the-copilots':
+    'https://commons.wikimedia.org/wiki/Special:FilePath/Star_Legend_-_Swansea.jpg?width=800',
+  'rock-in-sea-classicos-do-rock-julho':
+    'https://commons.wikimedia.org/wiki/Special:FilePath/Mariner_of_the_seas.jpg?width=800',
+  'aguas-passadas':
+    'https://commons.wikimedia.org/wiki/Special:FilePath/AMERICAN_CONSTITUTION,_Camden_Maine_July_9,_2018.jpg?width=800',
+};
+
 function coverImageUrlFor(slug: string): string {
-  return `https://picsum.photos/seed/${slug}/800/600`;
+  // Fallback defensivo (nunca deveria disparar pros 8 cruzeiros de seed acima, todos mapeados) —
+  // se algum cruzeiro novo for adicionado ao seed sem entrar no mapa, ainda ganha uma foto
+  // (generica, nao necessariamente de navio) em vez de voltar pro gradiente sem motivo aparente.
+  return CRUISE_COVER_IMAGES[slug] ?? `https://picsum.photos/seed/${slug}/800/600`;
 }
 
 async function hashPassword(): Promise<string> {
