@@ -8,10 +8,17 @@ export const REFRESH_COOKIE_NAME = 'seapass_refresh_token';
  * "vaza" em requests para o resto da API.
  */
 function cookieOptions(maxAgeMs: number): CookieOptions {
+  const isProduction = process.env.NODE_ENV === 'production';
   return {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
+    secure: isProduction,
+    // Frontend (Vercel) e API (Railway) vivem em dominios diferentes em producao — cross-site.
+    // 'lax' nunca e enviado num fetch cross-site (so em navegacao top-level), entao o refresh
+    // silencioso (ver auth-context.tsx) sempre falhava e derrubava a sessao ao voltar pra aba.
+    // 'none' exige Secure=true — por isso so em producao; em dev, http://localhost nao tem
+    // HTTPS, e 'none' sem Secure e rejeitado pelo browser ('lax' funciona em dev porque
+    // front/back sao "same-site" ali, so portas diferentes).
+    sameSite: isProduction ? 'none' : 'lax',
     path: '/auth',
     maxAge: maxAgeMs,
   };

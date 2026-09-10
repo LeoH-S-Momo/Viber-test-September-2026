@@ -1,6 +1,19 @@
 import { authFetchJson, type ServiceResult } from '@/lib/api-client';
 
-export type FeatureFlagKey = 'ADVANCED_ANALYTICS' | 'EARLY_CHECKIN_WINDOW' | 'CUSTOM_BRANDING';
+export type FeatureFlagKey =
+  | 'ADVANCED_ANALYTICS'
+  | 'EARLY_CHECKIN_WINDOW'
+  | 'CUSTOM_BRANDING'
+  | 'LOYALTY_POINTS'
+  | 'MULTI_CURRENCY_PRICING'
+  | 'DYNAMIC_PRICING'
+  | 'GROUP_BOOKING_DISCOUNTS'
+  | 'VIRTUAL_CABIN_TOUR'
+  | 'LIVE_CHAT_SUPPORT'
+  | 'SOCIAL_SHARE_REVIEWS'
+  | 'CABIN_WAITLIST'
+  | 'CARBON_OFFSET'
+  | 'REFERRAL_PROGRAM';
 
 export interface FeatureFlagView {
   key: FeatureFlagKey;

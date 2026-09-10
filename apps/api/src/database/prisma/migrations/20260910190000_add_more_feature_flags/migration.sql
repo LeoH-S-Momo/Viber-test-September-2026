@@ -1,0 +1,13 @@
+-- AlterEnum
+-- 10 novas flags mockadas (ideias de incremento futuro) — ver
+-- FEATURE_FLAG_CATALOG em feature-flag-catalog.ts para nome/descricao de cada uma.
+ALTER TYPE "FeatureFlagKey" ADD VALUE 'LOYALTY_POINTS';
+ALTER TYPE "FeatureFlagKey" ADD VALUE 'MULTI_CURRENCY_PRICING';
+ALTER TYPE "FeatureFlagKey" ADD VALUE 'DYNAMIC_PRICING';
+ALTER TYPE "FeatureFlagKey" ADD VALUE 'GROUP_BOOKING_DISCOUNTS';
+ALTER TYPE "FeatureFlagKey" ADD VALUE 'VIRTUAL_CABIN_TOUR';
+ALTER TYPE "FeatureFlagKey" ADD VALUE 'LIVE_CHAT_SUPPORT';
+ALTER TYPE "FeatureFlagKey" ADD VALUE 'SOCIAL_SHARE_REVIEWS';
+ALTER TYPE "FeatureFlagKey" ADD VALUE 'CABIN_WAITLIST';
+ALTER TYPE "FeatureFlagKey" ADD VALUE 'CARBON_OFFSET';
+ALTER TYPE "FeatureFlagKey" ADD VALUE 'REFERRAL_PROGRAM';

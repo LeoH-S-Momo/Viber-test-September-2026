@@ -248,7 +248,10 @@ async function seedCabinCategoriesAndCabins(shipId: string, decks: Record<number
       sizeSqm: 14,
       deckNumber: 4,
       codePrefix: '41',
-      count: 6,
+      // 8 (nao 6) — precisamos de 30 cabines distintas no total pra cobrir os 30
+      // avaliadores do cruzeiro "Aguas passadas" (1 booking por cabine por
+      // cruzeiro, ver constraint unica cabinId+cruiseId em Booking).
+      count: 8,
     },
     {
       slug: 'externa',
@@ -257,7 +260,7 @@ async function seedCabinCategoriesAndCabins(shipId: string, decks: Record<number
       sizeSqm: 17,
       deckNumber: 6,
       codePrefix: '62',
-      count: 6,
+      count: 8,
     },
     {
       slug: 'varanda',
@@ -266,7 +269,7 @@ async function seedCabinCategoriesAndCabins(shipId: string, decks: Record<number
       sizeSqm: 20,
       deckNumber: 8,
       codePrefix: '83',
-      count: 6,
+      count: 8,
     },
     {
       slug: 'suite',
@@ -275,7 +278,7 @@ async function seedCabinCategoriesAndCabins(shipId: string, decks: Record<number
       sizeSqm: 32,
       deckNumber: 10,
       codePrefix: '104',
-      count: 4,
+      count: 6,
     },
   ];
 
@@ -1227,6 +1230,296 @@ async function seedPastVoyageWithReviews(
   return cruise;
 }
 
+/**
+ * 30 entradas fake na trilha de auditoria — só pra aba "Auditoria" do admin
+ * (`admin/auditoria`) ter conteúdo pra mostrar (pedido explícito do usuário),
+ * sem depender de alguém ter operado o painel manualmente antes. Reaproveita
+ * as strings de `action` reais já usadas pelo `AuditLogService.record` em
+ * outros módulos (ver grep em `admin-coupons.service.ts`, `cruises.service.ts`
+ * etc.) pra ficar indistinguível de auditoria de verdade. IDs fixos (upsert)
+ * pra rodar `pnpm db:seed` de novo sem duplicar.
+ */
+async function seedAuditLogTrail(users: Awaited<ReturnType<typeof seedUsers>>, cruise: { id: string }) {
+  const entries: Array<{
+    actorUserId: string | null;
+    action: string;
+    entityType: string;
+    entityId: string;
+    metadata?: Prisma.InputJsonValue;
+    daysAgo: number;
+  }> = [
+    { actorUserId: users.admin.id, action: 'organizer.approved', entityType: 'Organizer', entityId: 'rock-in-sea', metadata: { previousStatus: 'PENDING' }, daysAgo: 42 },
+    { actorUserId: users.organizerAdmin.id, action: 'cruise.created', entityType: 'Cruise', entityId: cruise.id, metadata: { title: 'Heavy Metal do Leo Sensations' }, daysAgo: 40 },
+    { actorUserId: users.organizerAdmin.id, action: 'cruise.published', entityType: 'Cruise', entityId: cruise.id, daysAgo: 39 },
+    { actorUserId: users.organizerAdmin.id, action: 'ship.created', entityType: 'Ship', entityId: 'seed-ship-harmonia', metadata: { name: 'MS Harmonia das Ondas' }, daysAgo: 39 },
+    { actorUserId: users.organizerAdmin.id, action: 'coupon.created', entityType: 'Coupon', entityId: 'ROCKINSEA10', metadata: { discountType: 'PERCENTAGE', discountValue: 10 }, daysAgo: 38 },
+    { actorUserId: users.admin.id, action: 'coupon.activated', entityType: 'Coupon', entityId: 'ROCKINSEA10', daysAgo: 38 },
+    { actorUserId: users.organizerStaff.id, action: 'ticket.checked_in', entityType: 'Ticket', entityId: 'seed-ticket-0231', metadata: { gate: 'Terminal 1 — Santos' }, daysAgo: 35 },
+    { actorUserId: users.organizerStaff.id, action: 'ticket.checked_in', entityType: 'Ticket', entityId: 'seed-ticket-0198', metadata: { gate: 'Terminal 1 — Santos' }, daysAgo: 35 },
+    { actorUserId: null, action: 'user.registered', entityType: 'User', entityId: 'seed-audit-user-1', metadata: { email: 'novo.passageiro1@example.com' }, daysAgo: 33 },
+    { actorUserId: null, action: 'user.registered', entityType: 'User', entityId: 'seed-audit-user-2', metadata: { email: 'novo.passageiro2@example.com' }, daysAgo: 32 },
+    { actorUserId: users.organizerAdmin.id, action: 'event.created', entityType: 'Event', entityId: 'seed-audit-event-1', metadata: { title: 'Show de Abertura — Maré Alta' }, daysAgo: 30 },
+    { actorUserId: users.organizerAdmin.id, action: 'restaurant.updated', entityType: 'Restaurant', entityId: 'seed-audit-restaurant-1', metadata: { field: 'cuisineType' }, daysAgo: 29 },
+    { actorUserId: users.admin.id, action: 'booking.admin_cancelled', entityType: 'Booking', entityId: 'seed-audit-booking-1', metadata: { reason: 'Solicitação do passageiro via suporte' }, daysAgo: 27 },
+    { actorUserId: users.organizerAdmin.id, action: 'cruise.updated', entityType: 'Cruise', entityId: cruise.id, metadata: { field: 'description' }, daysAgo: 26 },
+    { actorUserId: users.admin.id, action: 'payment.refunded', entityType: 'Payment', entityId: 'seed-audit-payment-1', metadata: { amount: '450.00', reason: 'Cabine com defeito no ar-condicionado' }, daysAgo: 24 },
+    { actorUserId: users.organizerStaff.id, action: 'ticket.checked_in', entityType: 'Ticket', entityId: 'seed-ticket-0344', metadata: { gate: 'Terminal 1 — Santos' }, daysAgo: 22 },
+    { actorUserId: users.organizerAdmin.id, action: 'experience.created', entityType: 'Experience', entityId: 'seed-audit-experience-1', metadata: { title: 'Tour pelos Bastidores do Show' }, daysAgo: 21 },
+    { actorUserId: users.admin.id, action: 'feature_flag.updated', entityType: 'OrganizerFeatureFlag', entityId: 'rock-in-sea:ADVANCED_ANALYTICS', metadata: { enabled: true }, daysAgo: 19 },
+    { actorUserId: users.admin.id, action: 'feature_flag.updated', entityType: 'OrganizerFeatureFlag', entityId: 'rock-in-sea:EARLY_CHECKIN_WINDOW', metadata: { enabled: false }, daysAgo: 19 },
+    { actorUserId: users.organizerAdmin.id, action: 'coupon.updated', entityType: 'Coupon', entityId: 'ROCKINSEA10', metadata: { field: 'maxUses' }, daysAgo: 17 },
+    { actorUserId: null, action: 'user.password_reset', entityType: 'User', entityId: 'seed-audit-user-3', metadata: { email: 'passageiro1@example.com' }, daysAgo: 16 },
+    { actorUserId: users.organizerAdmin.id, action: 'ship.updated', entityType: 'Ship', entityId: 'seed-ship-harmonia', metadata: { field: 'passengerCapacity' }, daysAgo: 15 },
+    { actorUserId: users.admin.id, action: 'cruise.admin_cancelled', entityType: 'Cruise', entityId: 'seed-audit-cancelled-cruise', metadata: { reason: 'Manutenção não programada do navio' }, daysAgo: 14 },
+    { actorUserId: users.organizerAdmin.id, action: 'event.updated', entityType: 'Event', entityId: 'seed-audit-event-1', metadata: { field: 'startAt' }, daysAgo: 12 },
+    { actorUserId: users.organizerStaff.id, action: 'ticket.checked_in', entityType: 'Ticket', entityId: 'seed-ticket-0410', metadata: { gate: 'Terminal 1 — Santos' }, daysAgo: 11 },
+    { actorUserId: users.admin.id, action: 'coupon.deactivated', entityType: 'Coupon', entityId: 'seed-audit-coupon-expired', metadata: { reason: 'Campanha encerrada' }, daysAgo: 9 },
+    { actorUserId: users.organizerAdmin.id, action: 'restaurant.created', entityType: 'Restaurant', entityId: 'seed-audit-restaurant-2', metadata: { name: 'Churrascaria do Mar' }, daysAgo: 8 },
+    { actorUserId: users.admin.id, action: 'payment.refunded', entityType: 'Payment', entityId: 'seed-audit-payment-2', metadata: { amount: '1200.00', reason: 'Cancelamento por overbooking de cabine' }, daysAgo: 6 },
+    { actorUserId: users.organizerAdmin.id, action: 'cruise.unpublished', entityType: 'Cruise', entityId: 'seed-audit-unpublished-cruise', metadata: { reason: 'Ajuste de itinerário' }, daysAgo: 4 },
+    { actorUserId: users.organizerAdmin.id, action: 'cruise.published', entityType: 'Cruise', entityId: 'seed-audit-unpublished-cruise', daysAgo: 2 },
+  ];
+
+  for (const [index, entry] of entries.entries()) {
+    const createdAt = new Date(Date.now() - entry.daysAgo * 24 * 60 * 60 * 1000);
+    const id = `seed-audit-log-${index + 1}`;
+    const existing = await prisma.auditLog.findUnique({ where: { id } });
+    if (!existing) {
+      await prisma.auditLog.create({
+        data: {
+          id,
+          actorUserId: entry.actorUserId,
+          action: entry.action,
+          entityType: entry.entityType,
+          entityId: entry.entityId,
+          metadata: entry.metadata,
+          createdAt,
+        },
+      });
+    }
+  }
+}
+
+const AGUAS_PASSADAS_DESCRIPTION = [
+  'Águas Passadas é o cruzeiro dedicado a relembrar os maiores sucessos que marcaram época, num repertório que atravessa décadas e gerações.',
+  'A bordo, a trilha sonora é feita de clássicos atemporais — aquelas músicas que todo mundo canta de cor, não importa a idade.',
+  'A viagem já navegou e ficou marcada pelos relatos de quem embarcou: noites de nostalgia boa, reencontros e memórias novas em cima de canções antigas.',
+  'Mesmo com a viagem encerrada, o cruzeiro segue no catálogo como registro da experiência — e das avaliações reais de quem esteve a bordo.',
+  'Uma celebração do que já passou, mas que continua vivo toda vez que a música toca de novo.',
+].join('\n');
+
+/**
+ * Cruzeiro "Águas passadas" — já navegado (disembarkationDate no passado),
+ * criado especificamente pra ter 30 avaliações reais e já aprovadas, visíveis
+ * na página pública sem exigir login (pedido explícito do usuário). Mesmo
+ * padrão de `seedPastVoyageWithReviews`, só que cobrindo as 4 categorias de
+ * cabine (22 cabines no navio) — com 30 avaliadores, alguns códigos de
+ * cabine se repetem entre si (cabines não têm trava de unicidade por
+ * cruzeiro no schema, e cada avaliador tem sua própria reserva/booking).
+ */
+async function seedAguasPassadasCruise(
+  organizerId: string,
+  shipId: string,
+  ports: Awaited<ReturnType<typeof seedPorts>>,
+  categories: Record<string, string>,
+  passwordHash: string,
+  moderatedByUserId: string,
+) {
+  const embarkationDate = new Date('2026-05-10T16:00:00Z');
+  const disembarkationDate = new Date('2026-05-15T09:00:00Z');
+
+  const cruise = await prisma.cruise.upsert({
+    where: { slug: 'aguas-passadas' },
+    update: {},
+    create: {
+      organizerId,
+      shipId,
+      title: 'Águas passadas',
+      slug: 'aguas-passadas',
+      theme: 'Sucessos Atemporais',
+      description: AGUAS_PASSADAS_DESCRIPTION,
+      status: 'PUBLISHED',
+      embarkationDate,
+      disembarkationDate,
+      embarkationPortId: ports.santos.id,
+      disembarkationPortId: ports.santos.id,
+    },
+  });
+
+  const itineraryDays: Array<{ dayNumber: number; portId: string | null; isEmbarkation?: boolean; isDisembarkation?: boolean }> = [
+    { dayNumber: 1, portId: ports.santos.id, isEmbarkation: true },
+    { dayNumber: 2, portId: ports.ilhaGrande.id },
+    { dayNumber: 3, portId: ports.buzios.id },
+    { dayNumber: 4, portId: null },
+    { dayNumber: 5, portId: ports.santos.id, isDisembarkation: true },
+  ];
+  for (const day of itineraryDays) {
+    await prisma.itineraryStop.upsert({
+      where: { cruiseId_dayNumber: { cruiseId: cruise.id, dayNumber: day.dayNumber } },
+      update: {},
+      create: {
+        cruiseId: cruise.id,
+        portId: day.portId,
+        dayNumber: day.dayNumber,
+        isEmbarkation: day.isEmbarkation ?? false,
+        isDisembarkation: day.isDisembarkation ?? false,
+      },
+    });
+  }
+
+  const categoryPricing: Record<string, number> = { interna: 1700, externa: 2100, varanda: 2800, suite: 4000 };
+  const pricingByCategory: Record<string, Prisma.CruiseCabinPricingGetPayload<Record<string, never>>> = {};
+  for (const [slug, price] of Object.entries(categoryPricing)) {
+    const cabinCategoryId = requireValue(categories[slug], `Categoria ${slug}`);
+    pricingByCategory[slug] = await prisma.cruiseCabinPricing.upsert({
+      where: { cruiseId_cabinCategoryId: { cruiseId: cruise.id, cabinCategoryId } },
+      update: {},
+      create: { cruiseId: cruise.id, cabinCategoryId, price, cancellationPolicy: 'Viagem já realizada.' },
+    });
+  }
+
+  // 30 cabines distintas (8 interna + 8 externa + 8 varanda + 6 suite) — uma por
+  // avaliador, respeitando a constraint unica (cabinId, cruiseId) em Booking.
+  const CABIN_CODES: Array<{ code: string; category: string }> = [
+    ...['4101', '4102', '4103', '4104', '4105', '4106', '4107', '4108'].map((code) => ({ code, category: 'interna' })),
+    ...['6201', '6202', '6203', '6204', '6205', '6206', '6207', '6208'].map((code) => ({ code, category: 'externa' })),
+    ...['8301', '8302', '8303', '8304', '8305', '8306', '8307', '8308'].map((code) => ({ code, category: 'varanda' })),
+    ...['10401', '10402', '10403', '10404', '10405', '10406'].map((code) => ({ code, category: 'suite' })),
+  ];
+
+  const REVIEWERS: Array<{ fullName: string; rating: number; comment: string }> = [
+    { fullName: 'Ana Beatriz Nogueira', rating: 5, comment: 'Simplesmente perfeito. Chorei ouvindo os clássicos no Teatro Ondas, trouxe lembranças da minha adolescência.' },
+    { fullName: 'Carlos Eduardo Pires', rating: 4, comment: 'Repertório excelente, só achei a fila do café da manhã meio longa nos primeiros dias.' },
+    { fullName: 'Beatriz Lacerda', rating: 5, comment: 'Viajei com minha mãe e foi emocionante ver ela cantando cada música. Voltaríamos com certeza.' },
+    { fullName: 'Diego Almeida Ferreira', rating: 3, comment: 'Show bom, mas esperava mais variedade no repertório da segunda noite.' },
+    { fullName: 'Fernanda Rocha Lima', rating: 5, comment: 'Melhor cruzeiro que já fiz. Atendimento impecável e programação musical maravilhosa.' },
+    { fullName: 'Gustavo Henrique Souza', rating: 4, comment: 'Cabine confortável, comida boa. Só o Wi-Fi que deixou a desejar em alto-mar.' },
+    { fullName: 'Helena Martins Costa', rating: 5, comment: 'Nostalgia boa do início ao fim. Fiz amizade com pessoas incríveis nas mesas do jantar.' },
+    { fullName: 'Igor Cavalcanti Dias', rating: 2, comment: 'Cabine interna bem apertada e o embarque em Santos demorou demais.' },
+    { fullName: 'Juliana Prado Barros', rating: 5, comment: 'Tudo impecável, desde o check-in até o desembarque. Já quero a próxima edição.' },
+    { fullName: 'Kleber Augusto Ramos', rating: 4, comment: 'Ótima viagem, staff muito atencioso. Faltou um pouco mais de opções vegetarianas.' },
+    { fullName: 'Larissa Fontoura Melo', rating: 5, comment: 'Reencontrei amigos de faculdade por acaso a bordo — a trilha sonora deixou tudo ainda mais especial.' },
+    { fullName: 'Marcelo Vieira Teixeira', rating: 5, comment: 'Show de abertura arrepiante. Recomendo demais pra quem curte um bom clássico.' },
+    { fullName: 'Natália Correia Duarte', rating: 4, comment: 'Muito bom, só senti falta de mais atividades durante o dia no mar aberto.' },
+    { fullName: 'Otávio Lemos Guimarães', rating: 5, comment: 'A vista da varanda foi maravilhosa, e a curadoria musical trouxe cada música certa na hora certa.' },
+    { fullName: 'Patrícia Andrade Monteiro', rating: 3, comment: 'Viagem ok, mas o ar-condicionado da cabine deu problema no terceiro dia.' },
+    { fullName: 'Rodrigo Nascimento Pinto', rating: 5, comment: 'Voltaria sem pensar duas vezes. Organização impecável do início ao fim.' },
+    { fullName: 'Sabrina Oliveira Cunha', rating: 4, comment: 'Adorei o clima nostálgico, dava pra sentir o carinho na curadoria do repertório.' },
+    { fullName: 'Thiago Moraes Batista', rating: 5, comment: 'Uma das melhores experiências que já vivi no mar. Staff nota 10, música impecável.' },
+    { fullName: 'Vanessa Ribeiro Castro', rating: 4, comment: 'Muito bom! Só achei o processo de desembarque um pouco confuso na hora de organizar a fila.' },
+    { fullName: 'William Santos Araújo', rating: 5, comment: 'Cada show trazia uma lembrança diferente. Emocionante para quem cresceu ouvindo essas músicas.' },
+    { fullName: 'Ximena Costa Rezende', rating: 5, comment: 'Perfeito para viajar em família. Meus pais amaram reviver os clássicos deles.' },
+    { fullName: 'Yasmin Carvalho Pereira', rating: 4, comment: 'Boa estrutura, boa comida, boa música. Só faltou um pouco mais de sombra na piscina.' },
+    { fullName: 'Zeca Fernandes Rocha', rating: 5, comment: 'Show inesquecível no Palco do Deck ao pôr do sol. Recomendo de olhos fechados.' },
+    { fullName: 'Amanda Brito Siqueira', rating: 3, comment: 'Boa viagem no geral, mas o cardápio do jantar poderia variar mais entre os dias.' },
+    { fullName: 'Bruno Tavares Nunes', rating: 5, comment: 'Voltei com saudade já no desembarque. Trilha sonora impecável do primeiro ao último dia.' },
+    { fullName: 'Camila Esteves Farias', rating: 4, comment: 'Muito boa experiência, staff sempre solícito. Só o horário do show de encerramento que atrasou um pouco.' },
+    { fullName: 'Daniel Xavier Moura', rating: 5, comment: 'Cada detalhe pensado com carinho. A curadoria musical trouxe memórias que eu nem lembrava que tinha.' },
+    { fullName: 'Eduarda Campos Vasconcelos', rating: 5, comment: 'Viagem incrível, fiz amizades para a vida toda e revivi músicas que marcaram minha juventude.' },
+    { fullName: 'Felipe Marques Andrade', rating: 4, comment: 'Recomendo bastante. A única ressalva é que o teatro lotou rápido nos shows principais.' },
+    { fullName: 'Gabriela Nunes Peixoto', rating: 5, comment: 'Experiência maravilhosa do início ao fim, com uma trilha sonora que emocionou todo mundo a bordo.' },
+  ];
+
+  const passengerRole = await prisma.role.findUniqueOrThrow({ where: { key: RoleKey.PASSENGER } });
+  const reviewCreatedAt = new Date(disembarkationDate.getTime() + 3 * 24 * 60 * 60 * 1000);
+
+  for (const [index, reviewer] of REVIEWERS.entries()) {
+    const email = `aguaspassadas.avaliador${index + 1}@example.com`;
+    const user = await prisma.user.upsert({
+      where: { email },
+      update: {},
+      create: {
+        email,
+        passwordHash,
+        fullName: reviewer.fullName,
+        status: 'ACTIVE',
+        emailVerifiedAt: new Date(),
+      },
+    });
+
+    const existingRole = await prisma.userRole.findFirst({
+      where: { userId: user.id, roleId: passengerRole.id, organizerId: null },
+      select: { id: true },
+    });
+    if (!existingRole) {
+      await prisma.userRole.create({ data: { userId: user.id, roleId: passengerRole.id, organizerId: null } });
+    }
+
+    const cabinSpec = requireValue(CABIN_CODES[index % CABIN_CODES.length], `Codigo de cabine para o avaliador ${index + 1}`);
+    const cabin = await prisma.cabin.findFirstOrThrow({ where: { code: cabinSpec.code, deck: { shipId } } });
+    const pricing = requireValue(pricingByCategory[cabinSpec.category], `Preco da categoria ${cabinSpec.category}`);
+
+    const breakdown = PricingEngine.calculate({
+      cabinPrice: pricing.price,
+      passengerCount: 1,
+      addonPrices: [],
+      discountAmount: new Prisma.Decimal(0),
+    });
+
+    const bookingId = `seed-aguas-passadas-booking-${index + 1}`;
+    const booking = await prisma.booking.upsert({
+      where: { id: bookingId },
+      update: {},
+      create: {
+        id: bookingId,
+        userId: user.id,
+        cruiseId: cruise.id,
+        cabinId: cabin.id,
+        status: 'CONFIRMED',
+        ...breakdown,
+        currency: pricing.currency,
+        confirmedAt: embarkationDate,
+      },
+    });
+
+    await prisma.bookingGuest.upsert({
+      where: { id: `seed-aguas-passadas-guest-${index + 1}` },
+      update: {},
+      create: {
+        id: `seed-aguas-passadas-guest-${index + 1}`,
+        bookingId: booking.id,
+        fullName: reviewer.fullName,
+        documentType: 'NATIONAL_ID',
+        documentNumber: String(20000000000 + index).slice(0, 11),
+        isPrimary: true,
+      },
+    });
+
+    await prisma.payment.upsert({
+      where: { simulatedTransactionId: `SIMULATED-SEED-AGUAS-PASSADAS-${index + 1}` },
+      update: {},
+      create: {
+        bookingId: booking.id,
+        method: 'CREDIT_CARD',
+        status: 'APPROVED',
+        amount: breakdown.totalAmount,
+        currency: pricing.currency,
+        simulatedTransactionId: `SIMULATED-SEED-AGUAS-PASSADAS-${index + 1}`,
+        paidAt: embarkationDate,
+      },
+    });
+
+    await prisma.review.upsert({
+      where: { bookingId: booking.id },
+      update: { rating: reviewer.rating, comment: reviewer.comment, status: 'APPROVED' },
+      create: {
+        id: `seed-aguas-passadas-review-${index + 1}`,
+        bookingId: booking.id,
+        userId: user.id,
+        cruiseId: cruise.id,
+        rating: reviewer.rating,
+        comment: reviewer.comment,
+        status: 'APPROVED',
+        moderatedAt: reviewCreatedAt,
+        moderatedByUserId,
+        createdAt: reviewCreatedAt,
+      },
+    });
+  }
+
+  return cruise;
+}
+
 async function main(): Promise<void> {
   console.log('Seeding SeaPass — dados de demonstração...');
 
@@ -1244,6 +1537,8 @@ async function main(): Promise<void> {
   await seedCabinAvailabilityDemoData(cruise.id, decks, categories, users);
   const additionalCruises = await seedAdditionalCruises(rockInSea.id, ship.id, ports, categories);
   const pastCruise = await seedPastVoyageWithReviews(rockInSea.id, ship.id, ports, categories, passwordHash, users.organizerAdmin.id);
+  const aguasPassadasCruise = await seedAguasPassadasCruise(rockInSea.id, ship.id, ports, categories, passwordHash, users.organizerAdmin.id);
+  await seedAuditLogTrail(users, cruise);
 
   console.log('Seed concluído com sucesso.');
   console.log('');
@@ -1260,6 +1555,9 @@ async function main(): Promise<void> {
     console.log(`  - "${c.title}" (slug: ${c.slug})`);
   }
   console.log(`  - "${pastCruise.title}" (slug: ${pastCruise.slug}) — 10 avaliações já aprovadas`);
+  console.log(`  - "${aguasPassadasCruise.title}" (slug: ${aguasPassadasCruise.slug}) — 30 avaliações já aprovadas`);
+  console.log('');
+  console.log('30 entradas de auditoria adicionadas (aba Auditoria do admin).');
 }
 
 main()
