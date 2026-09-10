@@ -1472,4 +1472,76 @@ pública do cruzeiro conferidos manualmente com os dev servers no ar — 10 aval
 disponível depois da feature entregue no registro anterior — o gap era real (nenhum booking do
 seed era elegível pra avaliação).
 
+---
+
+## 2026-09-10 — Deploy em produção (Railway + Vercel)
+
+**O quê:** sistema publicado com API na Railway (Docker, Postgres + Redis como plugins do mesmo
+projeto) e frontend na Vercel (`apps/web`, root directory configurado no monorepo). API acessível
+em `https://seapass-seapass-env.up.railway.app`, frontend em
+`https://viber-test-september-2026-web.vercel.app`.
+
+**Bug encontrado e corrigido:** `pnpm --filter @seapass/api deploy --prod` roda o `postinstall`
+(`prisma generate`) durante o próprio empacotamento e reporta sucesso, mas o Prisma Client gerado
+não sobrevive na pasta final — container subia e caía na hora com `Cannot find module
+'.prisma/client/default'`. Corrigido em `infra/docker/api.Dockerfile` rodando `prisma generate` de
+novo, explicitamente, depois do `pnpm deploy` já ter empacotado tudo.
+
+**Bug encontrado e corrigido:** Alpine não vem com OpenSSL — sem isso o Prisma não detecta a versão
+de libssl disponível e usa um binário "chutado" pro query engine (`apk add --no-cache openssl`
+adicionado ao estágio base do Dockerfile).
+
+**Bug encontrado e corrigido:** `CMD` do container não rodava nenhuma migration — banco subia
+vazio. Corrigido rodando `prisma migrate deploy` antes de `node dist/main.js` a cada boot
+(idempotente, seguro repetir).
+
+**Testado:** login/checkout/ingressos/check-in testados manualmente contra a API e o frontend
+publicados; `curl` confirmando CORS liberado pra origem da Vercel.
+
+**Por quê:** pedido explícito do usuário pra tornar o sistema acessível por browser, fora do
+ambiente local.
+
+## 2026-09-10 — Bug de logout cross-site + 10 feature flags + dados de demonstração adicionais
+
+**O quê:** 10 novas feature flags mockadas no catálogo (`LOYALTY_POINTS`,
+`MULTI_CURRENCY_PRICING`, `DYNAMIC_PRICING`, `GROUP_BOOKING_DISCOUNTS`, `VIRTUAL_CABIN_TOUR`,
+`LIVE_CHAT_SUPPORT`, `SOCIAL_SHARE_REVIEWS`, `CABIN_WAITLIST`, `CARBON_OFFSET`,
+`REFERRAL_PROGRAM`) — ideias de incremento futuro, sem nenhuma feature real dependendo delas (mesmo
+padrão de extensão documentado no catálogo original). 30 entradas de auditoria adicionadas ao seed
+pra aba `admin/auditoria` ter conteúdo real pra mostrar. Cruzeiro "Águas passadas" (já navegado)
+criado com 30 avaliações reais, todas já `APPROVED` e visíveis publicamente sem login — navio
+ganhou mais cabines (30 no total) pra suportar 30 reservas distintas na mesma viagem (constraint
+única `cabinId+cruiseId` em `Booking`).
+
+**Bug encontrado e corrigido:** usuário reportava logout intermitente ao trocar de aba e voltar.
+Causa: `refresh-cookie.ts` usava `sameSite: 'lax'` fixo — em produção, frontend (Vercel) e API
+(Railway) são domínios diferentes (cross-site), e cookies `Lax` nunca são enviados num `fetch`
+cross-site (só em navegação top-level), então o refresh silencioso (`auth-context.tsx`) sempre
+falhava e derrubava a sessão. Corrigido pra `sameSite: 'none'` (com `secure: true`, já exigido por
+`None`) em produção, mantendo `'lax'` em dev (`localhost` em portas diferentes é same-site).
+
+**Testado:** `pnpm test` (302/302) e `tsc --noEmit` (api e web) passando após as mudanças; seed
+rodado localmente e novamente contra produção (via `railway connect --tunnel-only`, sem expor o
+banco publicamente) — idempotente nas duas execuções.
+
+**Por quê:** pedido explícito do usuário — corrigir o bug de sessão, e povoar auditoria/feature
+flags/avaliações pra demonstração ficar mais completa antes de uma apresentação.
+
+---
+
+## 2026-09-10 — Foto de capa por cruzeiro nos cards
+
+**O quê:** cada cruzeiro do seed passa a ter `coverImageUrl` preenchido (campo já existia no
+schema, nunca populado) — `CoverArt` (`apps/web/src/components/ui/cover-art.tsx`) então renderiza
+uma fotografia de verdade em vez do fallback em gradiente. Sem upload de imagem implementado ainda,
+usado Picsum Photos seedado pelo slug do cruzeiro (`picsum.photos/seed/<slug>/800/600`) — sempre a
+mesma foto pro mesmo cruzeiro, uma foto diferente por card, sem depender de curadoria manual nem de
+licenciamento incerto de banco de imagens de terceiros.
+
+**Testado:** seed rodado localmente e contra produção; conferido que os 8 cruzeiros têm URLs de
+capa distintas.
+
+**Por quê:** pedido explícito do usuário — cards de cruzeiro diferentes deveriam mostrar fotos
+diferentes entre si.
+
 <!-- Novas entradas são adicionadas ao final, em ordem cronológica, cada uma com data, "O quê" e "Por quê". -->

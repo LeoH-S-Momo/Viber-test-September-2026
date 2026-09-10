@@ -7,6 +7,17 @@ const prisma = new PrismaClient();
 
 const TEST_PASSWORD = 'Seapass@123';
 
+/**
+ * Foto real e estavel por cruzeiro (nao ha upload de imagem implementado ainda — ver
+ * `coverImageUrl` opcional no schema e o fallback em gradiente de `CoverArt`). Picsum Photos
+ * (`picsum.photos/seed/...`) devolve sempre a MESMA fotografia pro mesmo seed — usar o slug do
+ * cruzeiro garante uma imagem diferente por card, sem depender de curadoria manual de fotos por
+ * tema nem de licenciamento incerto de um banco de imagens de terceiros.
+ */
+function coverImageUrlFor(slug: string): string {
+  return `https://picsum.photos/seed/${slug}/800/600`;
+}
+
 async function hashPassword(): Promise<string> {
   return bcrypt.hash(TEST_PASSWORD, 10);
 }
@@ -507,6 +518,7 @@ async function seedHeavyMetalCruise(
       title: 'Heavy Metal do Leo Sensations',
       theme: 'Heavy Metal',
       description: HEAVY_METAL_DESCRIPTION,
+      coverImageUrl: coverImageUrlFor('heavy-metal-do-leo-sensations'),
     },
     create: {
       organizerId,
@@ -515,6 +527,7 @@ async function seedHeavyMetalCruise(
       slug: 'heavy-metal-do-leo-sensations',
       theme: 'Heavy Metal',
       description: HEAVY_METAL_DESCRIPTION,
+      coverImageUrl: coverImageUrlFor('heavy-metal-do-leo-sensations'),
       status: 'PUBLISHED',
       embarkationDate,
       disembarkationDate,
@@ -809,6 +822,7 @@ async function seedAdditionalCruises(
         title: data.title,
         theme: data.theme,
         description: data.description,
+        coverImageUrl: coverImageUrlFor(data.slug),
       },
       create: {
         organizerId,
@@ -817,6 +831,7 @@ async function seedAdditionalCruises(
         slug: data.slug,
         theme: data.theme,
         description: data.description,
+        coverImageUrl: coverImageUrlFor(data.slug),
         status: 'PUBLISHED',
         embarkationDate: data.embarkationDate,
         disembarkationDate: data.disembarkationDate,
@@ -1062,7 +1077,7 @@ async function seedPastVoyageWithReviews(
 
   const cruise = await prisma.cruise.upsert({
     where: { slug: 'rock-in-sea-classicos-do-rock-julho' },
-    update: {},
+    update: { coverImageUrl: coverImageUrlFor('rock-in-sea-classicos-do-rock-julho') },
     create: {
       organizerId,
       shipId,
@@ -1071,6 +1086,7 @@ async function seedPastVoyageWithReviews(
       theme: 'Rock Clássico',
       description:
         'Edição de julho do Clássicos do Rock — já navegada, mantida no catálogo com as avaliações reais dos passageiros que embarcaram.',
+      coverImageUrl: coverImageUrlFor('rock-in-sea-classicos-do-rock-julho'),
       status: 'PUBLISHED',
       embarkationDate,
       disembarkationDate,
@@ -1330,7 +1346,7 @@ async function seedAguasPassadasCruise(
 
   const cruise = await prisma.cruise.upsert({
     where: { slug: 'aguas-passadas' },
-    update: {},
+    update: { coverImageUrl: coverImageUrlFor('aguas-passadas') },
     create: {
       organizerId,
       shipId,
@@ -1338,6 +1354,7 @@ async function seedAguasPassadasCruise(
       slug: 'aguas-passadas',
       theme: 'Sucessos Atemporais',
       description: AGUAS_PASSADAS_DESCRIPTION,
+      coverImageUrl: coverImageUrlFor('aguas-passadas'),
       status: 'PUBLISHED',
       embarkationDate,
       disembarkationDate,
