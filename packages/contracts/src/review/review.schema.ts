@@ -20,3 +20,9 @@ export const ReviewModerationQuerySchema = PaginationQuerySchema.extend({
   status: ReviewStatusSchema.optional(),
 });
 export type ReviewModerationQuery = z.infer<typeof ReviewModerationQuerySchema>;
+
+/** Ver GET /reviews/highlights (secao de depoimentos + contador da home publica). */
+export const ReviewHighlightsQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(20).default(6),
+});
+export type ReviewHighlightsQuery = z.infer<typeof ReviewHighlightsQuerySchema>;

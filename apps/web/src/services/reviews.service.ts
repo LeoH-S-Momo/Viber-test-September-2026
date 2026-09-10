@@ -22,6 +22,21 @@ export interface PublicReview {
 
 export type CruiseReviewsResult = PaginatedResult<PublicReview> & { averageRating: number | null };
 
+export interface ReviewHighlight {
+  id: string;
+  rating: number;
+  comment: string | null;
+  passengerName: string;
+  cruiseTitle: string;
+  cruiseSlug: string;
+}
+
+export interface ReviewHighlightsResult {
+  items: ReviewHighlight[];
+  total: number;
+  averageRating: number | null;
+}
+
 export interface ModerationReview {
   id: string;
   rating: number;
@@ -53,6 +68,11 @@ export function submitReview(
 
 export function getCruiseReviews(slug: string, page = 1): Promise<ServiceResult<CruiseReviewsResult>> {
   return safeFetchJson<CruiseReviewsResult>(`${getApiBaseUrl()}/cruises/${slug}/reviews${qs({ page })}`);
+}
+
+/** Depoimentos + contador da home pública — ver features/home/*. */
+export function getReviewHighlights(limit = 6): Promise<ServiceResult<ReviewHighlightsResult>> {
+  return safeFetchJson<ReviewHighlightsResult>(`${getApiBaseUrl()}/reviews/highlights${qs({ limit })}`);
 }
 
 export function listReviewsForModeration(

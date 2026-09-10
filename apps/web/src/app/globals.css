@@ -38,3 +38,76 @@ body {
   background-color: #f8fafc;
   color: #0f172a;
 }
+
+/* ---------------------------------------------------------------------------------------------
+ * Artifícios visuais da home publica (ver apps/web/src/features/home/) — classes CSS simples em
+ * vez de tentar forcar tudo pelas utilities do Tailwind 4, mais facil de ler junto com as
+ * animacoes. Todas respeitam `prefers-reduced-motion` no bloco no final do arquivo.
+ * ------------------------------------------------------------------------------------------- */
+
+/* Zoom lento e continuo no fundo do hero. */
+@keyframes ken-burns {
+  0% { transform: scale(1) translate3d(0, 0, 0); }
+  100% { transform: scale(1.12) translate3d(-1.5%, -1%, 0); }
+}
+.animate-ken-burns {
+  animation: ken-burns 24s ease-in-out infinite alternate;
+}
+
+/* Padrao de onda do hero deslizando horizontalmente em loop. */
+@keyframes wave-scroll {
+  from { background-position-x: 0; }
+  to { background-position-x: -1200px; }
+}
+.animate-wave-scroll {
+  animation: wave-scroll 22s linear infinite;
+}
+
+/* Faixa "proximos embarques" — duas copias do conteudo lado a lado, desliza metade da largura
+   (a segunda copia entra exatamente onde a primeira saiu, loop sem costura visivel). */
+@keyframes marquee-scroll {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+.animate-marquee {
+  animation: marquee-scroll 34s linear infinite;
+}
+.animate-marquee:hover {
+  animation-play-state: paused;
+}
+
+/* Entrada por scroll — a classe -visible e adicionada via IntersectionObserver (ScrollReveal). */
+.scroll-reveal {
+  opacity: 0;
+  transform: translateY(28px);
+  transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1), transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.scroll-reveal.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Tilt sutil + elevacao no hover dos cards de cruzeiro — substitui o hover:-translate-y do
+   Tailwind (ver cruise-card.tsx) pra nao competir pela mesma propriedade `transform`. */
+.card-tilt {
+  transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.4s ease;
+}
+.card-tilt:hover {
+  transform: perspective(900px) rotateX(1.5deg) rotateY(-2.5deg) translateY(-6px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-ken-burns,
+  .animate-wave-scroll,
+  .animate-marquee {
+    animation: none !important;
+  }
+  .card-tilt:hover {
+    transform: none !important;
+  }
+  .scroll-reveal {
+    opacity: 1 !important;
+    transform: none !important;
+    transition: none !important;
+  }
+}

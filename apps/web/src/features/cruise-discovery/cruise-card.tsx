@@ -11,14 +11,14 @@ export function CruiseCard({ cruise }: { cruise: CruiseSummary }) {
   return (
     <Link
       href={`/cruzeiros/${cruise.slug}`}
-      className="group flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+      className="card-tilt group flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm hover:shadow-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
     >
-      <div className="relative">
+      <div className="relative overflow-hidden">
         <CoverArt
           imageUrl={cruise.coverImageUrl}
           seed={cruise.slug}
           title={cruise.title}
-          className="h-44 w-full"
+          className="h-44 w-full transition-transform duration-500 ease-out group-hover:scale-110"
         />
         <div className="absolute left-3 top-3">
           <Badge tone="accent">{cruise.theme}</Badge>

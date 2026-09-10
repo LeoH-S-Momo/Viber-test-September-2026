@@ -70,6 +70,22 @@ export class ReviewsService {
     };
   }
 
+  async getHighlights(limit: number) {
+    const { reviews, total, averageRating } = await this.reviewsRepository.findHighlights(limit);
+    return {
+      items: reviews.map((review) => ({
+        id: review.id,
+        rating: review.rating,
+        comment: review.comment,
+        passengerName: review.booking.user.fullName,
+        cruiseTitle: review.cruise.title,
+        cruiseSlug: review.cruise.slug,
+      })),
+      total,
+      averageRating: averageRating ? Math.round(averageRating * 10) / 10 : null,
+    };
+  }
+
   async listForModeration(organizerId: string, status: ReviewStatus | undefined, page: number, pageSize: number) {
     const [reviews, total] = await this.reviewsRepository.findForModeration(organizerId, status, page, pageSize);
     const view = reviews.map((review) => ({

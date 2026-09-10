@@ -79,6 +79,30 @@ export class ReviewsRepository {
     ]);
   }
 
+  /**
+   * Avaliações em destaque pra home pública (depoimentos + contador de estatísticas) — só
+   * `APPROVED` com comentário (sem comentário não rende card de depoimento), ordenado por nota
+   * desc. `total`/`averageRating` são globais (todas as `APPROVED`, não só as `limit` retornadas),
+   * pro contador da home mostrar o número real, não só o que coube na lista.
+   */
+  async findHighlights(limit: number) {
+    const where: Prisma.ReviewWhereInput = { status: ReviewStatus.APPROVED, comment: { not: null } };
+    const [reviews, total, aggregate] = await Promise.all([
+      this.prisma.review.findMany({
+        where,
+        orderBy: [{ rating: 'desc' }, { createdAt: 'desc' }],
+        take: limit,
+        include: {
+          booking: { select: { user: { select: { fullName: true } } } },
+          cruise: { select: { title: true, slug: true } },
+        },
+      }),
+      this.prisma.review.count({ where: { status: ReviewStatus.APPROVED } }),
+      this.prisma.review.aggregate({ where: { status: ReviewStatus.APPROVED }, _avg: { rating: true } }),
+    ]);
+    return { reviews, total, averageRating: aggregate._avg.rating };
+  }
+
   updateStatus(id: string, status: ReviewStatus, moderatedByUserId: string, note?: string) {
     return this.prisma.review.update({
       where: { id },

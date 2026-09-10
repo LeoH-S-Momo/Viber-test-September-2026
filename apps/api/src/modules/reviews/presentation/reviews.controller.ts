@@ -4,8 +4,10 @@ import { RoleKey } from '@prisma/client';
 import {
   CreateReviewSchema,
   PaginationQuerySchema,
+  ReviewHighlightsQuerySchema,
   type CreateReviewInput,
   type PaginationQuery,
+  type ReviewHighlightsQuery,
 } from '@seapass/contracts';
 import { Public } from '../../../common/decorators/public.decorator';
 import { Roles } from '../../../common/decorators/roles.decorator';
@@ -45,5 +47,12 @@ export class ReviewsController {
     @Query(new ZodValidationPipe(PaginationQuerySchema)) query: PaginationQuery,
   ) {
     return this.reviewsService.listApprovedForCruise(slug, query.page, query.pageSize);
+  }
+
+  /** Depoimentos + contador da home publica (ver features/home/testimonials-section.tsx no frontend). */
+  @Public()
+  @Get('reviews/highlights')
+  highlights(@Query(new ZodValidationPipe(ReviewHighlightsQuerySchema)) query: ReviewHighlightsQuery) {
+    return this.reviewsService.getHighlights(query.limit);
   }
 }
