@@ -16,6 +16,13 @@ RUN pnpm install --frozen-lockfile
 RUN pnpm --filter @seapass/contracts build
 RUN pnpm --filter @seapass/api build
 RUN pnpm --filter @seapass/api deploy --prod /app/deploy
+# `pnpm deploy` roda o postinstall (prisma generate) durante o proprio empacotamento, mas nao
+# preserva o resultado na pasta final — o Prisma Client gerado (node_modules/.prisma/client)
+# some da pasta /app/deploy, mesmo o log do passo acima reportando sucesso (limitacao conhecida
+# do `pnpm deploy`, reproduzida e confirmada localmente antes desta correcao). Sem esta linha, o
+# container sobe e cai na hora com "Cannot find module '.prisma/client/default'". Gerar de novo
+# AQUI, depois do deploy, contra a pasta ja empacotada, e o que garante que o cliente sobrevive.
+RUN cd /app/deploy && node_modules/.bin/prisma generate --schema src/database/prisma/schema.prisma
 
 FROM base AS runtime
 ENV NODE_ENV=production
