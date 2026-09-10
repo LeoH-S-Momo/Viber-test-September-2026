@@ -7,6 +7,10 @@
 # ao copiar apenas parte do node_modules entre estagios do Docker.
 
 FROM node:20-alpine AS base
+# Alpine nao vem com OpenSSL — sem isso, o Prisma nao consegue detectar a versao de libssl
+# disponivel e cai num binario "chutado" pro query engine (aviso "Defaulting to openssl-1.1.x"),
+# o que pode virar erro de carregamento em runtime se o chute nao bater com o que a imagem tem.
+RUN apk add --no-cache openssl
 RUN corepack enable
 WORKDIR /app
 
@@ -38,4 +42,7 @@ EXPOSE 3333
 # Redis), nao so "o processo esta de pe".
 HEALTHCHECK --interval=10s --timeout=5s --start-period=10s --retries=5 \
   CMD node -e "require('http').get('http://localhost:3333/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
-CMD ["node", "dist/main.js"]
+# `migrate deploy` (nao `migrate dev`) — so aplica migrations ja commitadas, nao gera nem pede
+# confirmacao interativa, seguro pra rodar em todo boot do container (idempotente: sem migration
+# pendente, e um no-op rapido).
+CMD ["sh", "-c", "node_modules/.bin/prisma migrate deploy --schema prisma/schema.prisma && node dist/main.js"]
