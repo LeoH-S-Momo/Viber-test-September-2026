@@ -34,7 +34,7 @@ const LINKS = [
   { href: '/admin/tickets', label: 'Tickets', icon: Ticket },
   { href: '/admin/check-ins', label: 'Check-ins', icon: ScanLine },
   { href: '/admin/feature-flags', label: 'Feature flags', icon: FlaskConical },
-  { href: '/admin/auditoria', label: 'Auditoria', icon: FileClock },
+  { href: '/admin/auditoria', label: '(Thiago) Auditoria', icon: FileClock },
 ];
 
 /** Navegacao do painel administrativo global — 13 modulos + auditoria (ver ADR-0018), so PLATFORM_ADMIN. */

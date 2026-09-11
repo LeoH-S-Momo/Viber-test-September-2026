@@ -38,7 +38,7 @@ export default function AdminAuditLogPage() {
     <>
       <SectionHeading
         eyebrow="Painel Admin"
-        title="Auditoria"
+        title="(Thiago) Auditoria"
         icon={<FileClock className="h-6 w-6 text-accent-600" aria-hidden="true" />}
         description="Registro de toda operação sensível na plataforma — quem fez, o que fez, quando fez e qual recurso foi afetado."
       />

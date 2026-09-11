@@ -33,6 +33,8 @@ const CRUISE_COVER_IMAGES: Record<string, string> = {
     'https://commons.wikimedia.org/wiki/Special:FilePath/Mariner_of_the_seas.jpg?width=800',
   'aguas-passadas':
     'https://commons.wikimedia.org/wiki/Special:FilePath/AMERICAN_CONSTITUTION,_Camden_Maine_July_9,_2018.jpg?width=800',
+  'thiago-nicolielo-rock-dos-anos-90':
+    'https://commons.wikimedia.org/wiki/Special:FilePath/Birka_June_2013.jpg?width=800',
 };
 
 function coverImageUrlFor(slug: string): string {
@@ -834,6 +836,22 @@ async function seedAdditionalCruises(
         'Entre um hit e outro, o navio se transforma em um verdadeiro palco intergaláctico, com direito a fantasias, coreografias e muita interação com o público.',
         'Como em qualquer cruzeiro temático, a viagem também oferece toda a estrutura tradicional de bordo, unindo espetáculo musical e conforto em alto-mar.',
         'Perfeito para quem gosta de se divertir, se fantasiar um pouco e viver uma experiência musical extravagante e inesquecível.',
+      ].join('\n'),
+    },
+    {
+      slug: 'thiago-nicolielo-rock-dos-anos-90',
+      title: 'Thiago Nicolielo apresenta: Rock dos Anos 90',
+      theme: 'Rock dos Anos 90 / Rock Clássico',
+      embarkationDate: new Date('2027-05-16T16:00:00Z'),
+      disembarkationDate: new Date('2027-05-21T09:00:00Z'),
+      pricing: { interna: 2200, externa: 2800, varanda: 3600, suite: 5200 },
+      description: [
+        'O cruzeiro Thiago Nicolielo apresenta: Rock dos Anos 90 é uma viagem no tempo para a década que consagrou o grunge, o rock alternativo e os grandes hinos do rock clássico que vieram antes dele.',
+        'Com Thiago Nicolielo comandando a seleção musical, os passageiros embarcam em noites que misturam guitarras distorcidas, riffs inesquecíveis e o espírito irreverente que definiu a cena dos anos 90.',
+        'O repertório também presta tributo aos clássicos que pavimentaram o caminho, unindo gerações em torno das músicas que continuam sendo tocadas em qualquer roda de rock.',
+        'Entre um show e outro, o navio se transforma em um verdadeiro palco de rock, com direito a bandas cover, telão com clipes de época e aquele clima nostálgico de camiseta de banda.',
+        'A experiência une a energia crua do rock à estrutura completa de um cruzeiro tradicional, com todo o conforto de viajar pelo mar.',
+        'Uma viagem pensada para quem cresceu ouvindo rock dos anos 90 e clássicos do gênero, e quer reviver essa trilha sonora em alto-mar.',
       ].join('\n'),
     },
   ];
